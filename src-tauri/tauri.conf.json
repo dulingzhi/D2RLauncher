@@ -29,13 +29,29 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": "nsis",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "dialog": true,
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEYxNkQwODdFNzE0MjI2NjMKUldSakprSnhmZ2h0OFlrK0VNbVkwQXAzcmZJemdseGp0QVFtdXN3QlE5ZWUzeEd0RXN5Ui9hczUK",
+      "endpoints": [
+        "https://github.com/dulingzhi/D2RLauncher/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

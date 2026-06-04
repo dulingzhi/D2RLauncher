@@ -18,6 +18,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             // 初始化游戏监控器
             let monitor = game_monitor::GameMonitor::new(app.handle().clone());
