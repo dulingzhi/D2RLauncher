@@ -36,7 +36,6 @@ const runningGames = ref<Map<string, GameInstance>>(new Map())
 const launchQueue = ref<string[]>([])  // 启动队列
 const currentLaunching = ref<string | null>(null)  // 当前正在启动的账号ID
 const waitingForLogin = ref<{ accountId: string; accountName: string } | null>(null)  // 正在等待登录的账号
-const launchStartTimes = ref<Map<string, number>>(new Map())  // 记录每个账号的启动时间戳（用于给游戏初始化宽容期）
 
 let unlistenGameStatus: UnlistenFn | null = null
 let unlistenLoginComplete: UnlistenFn | null = null
@@ -109,19 +108,9 @@ onMounted(async () => {
     if (currentLaunching.value && waitingForLogin.value) {
       const isGameRunning = newMap.has(currentLaunching.value)
       
-      // 获取该账号的启动时间
-      const launchTime = launchStartTimes.value.get(currentLaunching.value)
-      const elapsedSeconds = launchTime ? (Date.now() - launchTime) / 1000 : 999
-      
-      // 只有启动超过 10 秒后才检测游戏关闭（给游戏初始化宽容期）
-      // 游戏启动前 10 秒窗口可能处于假死状态，game_monitor 检测不到
-      if (!isGameRunning && elapsedSeconds > 10) {
+      // 基于 PID 监控，游戏进程立即可见，无需宽容期
+      if (!isGameRunning) {
         console.log(`⚠️ 检测到正在等待登录的游戏 ${waitingForLogin.value.accountName} 已关闭，清除遮罩层`)
-        
-        // 清除启动时间记录（在清除 currentLaunching 之前）
-        if (currentLaunching.value) {
-          launchStartTimes.value.delete(currentLaunching.value)
-        }
         
         waitingForLogin.value = null
         currentLaunching.value = null
@@ -161,11 +150,6 @@ onMounted(async () => {
       
       // 清除等待登录状态
       waitingForLogin.value = null
-      
-      // 清除启动时间记录
-      if (event.payload.account_id) {
-        launchStartTimes.value.delete(event.payload.account_id)
-      }
       
       // 启动队列中的下一个账号
       currentLaunching.value = null
@@ -218,6 +202,8 @@ async function handleSave(data: Omit<Account, 'id' | 'encrypted_token' | 'token_
       customArgs: data.custom_args,
       windowX: data.window_x,
       windowY: data.window_y,
+      windowWidth: data.window_width,
+      windowHeight: data.window_height,
     })
   }
   showModal.value = false
@@ -256,9 +242,6 @@ async function handleLaunchAccount(account: Account) {
       gamePath: settings.game_path,
     })
     
-    // 记录启动时间（用于给游戏初始化宽容期）
-    launchStartTimes.value.set(account.id, Date.now())
-    
     // 如果禁用了登录检测，立即清除状态
     if (!settings.wait_for_login) {
       currentLaunching.value = null
@@ -270,9 +253,6 @@ async function handleLaunchAccount(account: Account) {
     alert(`启动失败: ${e}`)
     currentLaunching.value = null
     waitingForLogin.value = null
-    if (account?.id) {
-      launchStartTimes.value.delete(account.id)
-    }
   }
 }
 
@@ -307,9 +287,6 @@ async function processLaunchQueue() {
       gamePath: settings.game_path,
     })
     
-    // 记录启动时间（用于给游戏初始化宽容期）
-    launchStartTimes.value.set(accountId, Date.now())
-    
     // 如果启用了登录检测，显示等待遮罩
     if (settings.wait_for_login) {
       waitingForLogin.value = {
@@ -331,7 +308,6 @@ async function processLaunchQueue() {
     batchMsg.value = `❌ ${account.label} 启动失败: ${e}`
     currentLaunching.value = null
     waitingForLogin.value = null  // 清除等待状态
-    launchStartTimes.value.delete(accountId)  // 清除启动时间记录
     // 继续启动下一个
     setTimeout(() => processLaunchQueue(), 2000)
   }

@@ -10,6 +10,7 @@ const settings = ref<Settings>({
   launch_delay_secs: 5,
   wait_for_login: true,
   login_timeout_secs: 60,
+  rename_window: true,
 })
 const saving = ref(false)
 const saved = ref(false)
@@ -109,6 +110,20 @@ function clearPath() {
         <label>批量启动间隔（秒）</label>
         <input v-model.number="settings.launch_delay_secs" type="number" min="1" max="60" />
         <p class="hint">批量启动多个账号时，每个账号之间的等待时间</p>
+      </div>
+    </div>
+
+    <div class="section">
+      <h4>窗口设置</h4>
+      <div class="field">
+        <label>
+          <input type="checkbox" v-model="settings.rename_window" />
+          修改游戏窗口标题为账号名称（方便识别）
+        </label>
+        <p class="hint">
+          启用后，游戏窗口标题将改为账号名称，便于区分多开窗口。
+          不启用也不影响游戏监控功能（基于进程 PID 跟踪）。
+        </p>
       </div>
     </div>
 

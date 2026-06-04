@@ -16,6 +16,8 @@ const email = ref('')
 const customArgs = ref('')
 const windowX = ref<number | null>(null)
 const windowY = ref<number | null>(null)
+const windowWidth = ref<number | null>(null)
+const windowHeight = ref<number | null>(null)
 
 watch(
   () => props.visible,
@@ -26,33 +28,51 @@ watch(
       customArgs.value = props.initial.custom_args
       windowX.value = props.initial.window_x
       windowY.value = props.initial.window_y
+      windowWidth.value = props.initial.window_width
+      windowHeight.value = props.initial.window_height
     } else if (v) {
       label.value = ''
       email.value = ''
       customArgs.value = ''
       windowX.value = null
       windowY.value = null
+      windowWidth.value = null
+      windowHeight.value = null
     }
   }
 )
 
 function submit() {
   if (!label.value.trim() || !email.value.trim()) return
+  
+  // 辅助函数：将空字符串/NaN转换为null，避免Rust后端类型错误
+  const toNullableNumber = (val: any): number | null => {
+    if (val === '' || val === null || val === undefined || Number.isNaN(val)) {
+      return null
+    }
+    return Number(val)
+  }
+  
   emit('save', {
     label: label.value.trim(),
     email: email.value.trim(),
     custom_args: customArgs.value.trim(),
-    window_x: windowX.value,
-    window_y: windowY.value,
+    window_x: toNullableNumber(windowX.value),
+    window_y: toNullableNumber(windowY.value),
+    window_width: toNullableNumber(windowWidth.value),
+    window_height: toNullableNumber(windowHeight.value),
   })
 }
 </script>
 
 <template>
   <Teleport to="body">
-    <div v-if="visible" class="modal-overlay" @click.self="emit('close')">
+    <div v-if="visible" class="modal-overlay">
       <div class="modal">
-        <h3>{{ initial ? '编辑账号' : '添加账号' }}</h3>
+        <div class="modal-header">
+          <h3>{{ initial ? '编辑账号' : '添加账号' }}</h3>
+          <button type="button" class="close-btn" @click="emit('close')" title="关闭">✕</button>
+        </div>
         <form @submit.prevent="submit">
           <div class="field">
             <label>显示名称 *</label>
@@ -69,11 +89,21 @@ function submit() {
           <div class="field-row">
             <div class="field">
               <label>窗口 X 坐标</label>
-              <input v-model.number="windowX" type="number" placeholder="可选" />
+              <input v-model.number="windowX" type="number" placeholder="留空居中" />
             </div>
             <div class="field">
               <label>窗口 Y 坐标</label>
-              <input v-model.number="windowY" type="number" placeholder="可选" />
+              <input v-model.number="windowY" type="number" placeholder="留空居中" />
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label>窗口宽度</label>
+              <input v-model.number="windowWidth" type="number" placeholder="留空保持默认" />
+            </div>
+            <div class="field">
+              <label>窗口高度</label>
+              <input v-model.number="windowHeight" type="number" placeholder="留空保持默认" />
             </div>
           </div>
           <div class="modal-actions">
@@ -101,12 +131,40 @@ function submit() {
   border: 1px solid #2d3050;
   border-radius: 12px;
   padding: 28px 32px;
-  width: 420px;
+  width: 460px;
   max-width: 95vw;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
 }
 .modal h3 {
-  margin: 0 0 20px;
+  margin: 0;
   font-size: 18px;
+  color: #e2e8f0;
+}
+.close-btn {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+.close-btn:hover {
+  background: rgba(148, 163, 184, 0.1);
   color: #e2e8f0;
 }
 .field {
@@ -114,12 +172,19 @@ function submit() {
   flex-direction: column;
   gap: 6px;
   margin-bottom: 16px;
+  width: 100%;
 }
 .field-row {
   display: flex;
   gap: 12px;
+  margin-bottom: 16px;
+  width: 100%;
 }
-.field-row .field { flex: 1; }
+.field-row .field { 
+  flex: 1;
+  margin-bottom: 0;
+  min-width: 0;
+}
 label {
   font-size: 13px;
   color: #94a3b8;

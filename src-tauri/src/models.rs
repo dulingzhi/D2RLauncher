@@ -12,4 +12,8 @@ pub struct Account {
     pub custom_args: String,
     pub window_x: Option<i32>,
     pub window_y: Option<i32>,
+    #[serde(default)]
+    pub window_width: Option<i32>,
+    #[serde(default)]
+    pub window_height: Option<i32>,
 }

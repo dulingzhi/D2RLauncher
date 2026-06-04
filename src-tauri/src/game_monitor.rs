@@ -27,6 +27,8 @@ pub struct GameStatus {
 pub struct GameMonitor {
     instances: Arc<Mutex<Vec<GameInstance>>>,
     start_times: Arc<Mutex<HashMap<u32, std::time::Instant>>>,
+    /// PID 到账号信息的映射表：PID -> (account_id, account_name, region)
+    pid_mappings: Arc<Mutex<HashMap<u32, (String, String, String)>>>,
     app_handle: AppHandle,
     monitoring: Arc<Mutex<bool>>,
 }
@@ -36,8 +38,24 @@ impl GameMonitor {
         Self {
             instances: Arc::new(Mutex::new(Vec::new())),
             start_times: Arc::new(Mutex::new(HashMap::new())),
+            pid_mappings: Arc::new(Mutex::new(HashMap::new())),
             app_handle,
             monitoring: Arc::new(Mutex::new(false)),
+        }
+    }
+
+    /// 注册游戏进程的 PID 和账号信息映射
+    pub fn register_game_process(&self, pid: u32, account_id: String, account_name: String, region: String) {
+        let mut mappings = self.pid_mappings.lock().unwrap();
+        mappings.insert(pid, (account_id.clone(), account_name.clone(), region));
+        println!("📝 注册游戏进程: PID={}, Account={} ({})", pid, account_name, account_id);
+    }
+
+    /// 注销游戏进程映射（游戏关闭时调用）
+    pub fn unregister_game_process(&self, pid: u32) {
+        let mut mappings = self.pid_mappings.lock().unwrap();
+        if let Some((account_id, account_name, _)) = mappings.remove(&pid) {
+            println!("🗑️  注销游戏进程: PID={}, Account={} ({})", pid, account_name, account_id);
         }
     }
 
@@ -45,6 +63,7 @@ impl GameMonitor {
     pub fn start_monitoring(&self) {
         let instances = Arc::clone(&self.instances);
         let start_times = Arc::clone(&self.start_times);
+        let pid_mappings = Arc::clone(&self.pid_mappings);
         let app_handle = self.app_handle.clone();
         let monitoring = Arc::clone(&self.monitoring);
 
@@ -56,12 +75,12 @@ impl GameMonitor {
             println!("🎮 游戏监控线程已启动（检测间隔: 2秒）");
             
             // 立即执行一次检查
-            Self::check_and_update(&instances, &start_times, &app_handle);
+            Self::check_and_update(&instances, &start_times, &pid_mappings, &app_handle);
 
             while *monitoring_clone.lock().unwrap() {
                 // 每 2 秒检查一次，快速响应状态变化
                 std::thread::sleep(Duration::from_secs(2));
-                Self::check_and_update(&instances, &start_times, &app_handle);
+                Self::check_and_update(&instances, &start_times, &pid_mappings, &app_handle);
             }
 
             println!("🛑 游戏监控线程已停止");
@@ -71,9 +90,10 @@ impl GameMonitor {
     fn check_and_update(
         instances: &Arc<Mutex<Vec<GameInstance>>>,
         start_times: &Arc<Mutex<HashMap<u32, std::time::Instant>>>,
+        pid_mappings: &Arc<Mutex<HashMap<u32, (String, String, String)>>>,
         app_handle: &AppHandle,
     ) {
-        if let Ok(running_games) = Self::check_running_games() {
+        if let Ok(running_games) = Self::check_running_games(pid_mappings) {
             println!("🔍 当前检测到 {} 个运行中的游戏", running_games.len());
             let mut times_guard = start_times.lock().unwrap();
             let now = std::time::Instant::now();
@@ -89,6 +109,19 @@ impl GameMonitor {
             let current_pids: Vec<u32> = games_with_time.iter().map(|g| g.process_id).collect();
             times_guard.retain(|pid, _| current_pids.contains(pid));
             drop(times_guard);
+            
+            // 清理已终止进程的 PID 映射
+            let mut mappings_guard = pid_mappings.lock().unwrap();
+            let terminated_pids: Vec<u32> = mappings_guard.keys()
+                .filter(|pid| !current_pids.contains(pid))
+                .copied()
+                .collect();
+            for pid in terminated_pids {
+                if let Some((account_id, account_name, _)) = mappings_guard.remove(&pid) {
+                    println!("🗑️  自动清理已终止进程的 PID 映射: PID={}, Account={} ({})", pid, account_name, account_id);
+                }
+            }
+            drop(mappings_guard);
             
             // 更新实例列表
             let mut instances_guard = instances.lock().unwrap();
@@ -110,15 +143,16 @@ impl GameMonitor {
         *self.monitoring.lock().unwrap() = false;
     }
 
-    /// 检查当前运行的游戏实例
-    fn check_running_games() -> Result<Vec<GameInstance>, String> {
+    /// 检查当前运行的游戏实例（基于 PID 映射表）
+    fn check_running_games(pid_mappings: &Arc<Mutex<HashMap<u32, (String, String, String)>>>) -> Result<Vec<GameInstance>, String> {
         let mut system = System::new();
         system.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
 
         let mut instances = Vec::new();
+        let mappings = pid_mappings.lock().unwrap();
+        
+        // 获取所有 D2R 窗口标题（用于显示，但不用于识别）
         let mut windows_map: std::collections::HashMap<u32, String> = std::collections::HashMap::new();
-
-        // 获取所有 D2R 窗口
         unsafe {
             let _ = EnumWindows(
                 Some(enum_window_callback),
@@ -126,65 +160,31 @@ impl GameMonitor {
             );
         }
 
-        // 查找所有 D2R.exe 进程
-        for process in system.processes_by_name(std::ffi::OsStr::new("D2R.exe")) {
-            let pid = process.pid().as_u32();
-
-            // 检查窗口标题
-            if let Some(window_title) = windows_map.get(&pid) {
-                // 窗口标题格式: "{ID} - {Name} ({Region}) - Diablo II: Resurrected"
-                if window_title.ends_with("- Diablo II: Resurrected") {
-                    if let Some(parsed) = Self::parse_window_title(window_title) {
-                        instances.push(GameInstance {
-                            account_id: parsed.0,
-                            account_name: parsed.1,
-                            region: parsed.2,
-                            process_id: pid,
-                            window_title: window_title.clone(),
-                            start_time: std::time::SystemTime::now(), // 简化版，实际应该记录真实启动时间
-                            total_seconds: 0,
-                        });
-                    }
-                }
+        // 遍历 PID 映射表，检查进程是否仍在运行
+        for (pid, (account_id, account_name, region)) in mappings.iter() {
+            // 检查进程是否存在
+            if let Some(_process) = system.process(sysinfo::Pid::from_u32(*pid)) {
+                let window_title = windows_map.get(pid)
+                    .cloned()
+                    .unwrap_or_else(|| "Diablo II: Resurrected".to_string());
+                
+                instances.push(GameInstance {
+                    account_id: account_id.clone(),
+                    account_name: account_name.clone(),
+                    region: region.clone(),
+                    process_id: *pid,
+                    window_title,
+                    start_time: std::time::SystemTime::now(), // 简化版
+                    total_seconds: 0,
+                });
+                
+                println!("✅ 游戏运行中: PID={}, Account={} ({})", pid, account_name, account_id);
+            } else {
+                println!("⚠️  进程已终止: PID={}, Account={} ({})", pid, account_name, account_id);
             }
         }
 
         Ok(instances)
-    }
-
-    /// 解析窗口标题，提取账号信息
-    /// 格式: "[UUID] MyAccount (cn) - Diablo II: Resurrected"
-    fn parse_window_title(title: &str) -> Option<(String, String, String)> {
-        if !title.ends_with("- Diablo II: Resurrected") {
-            return None;
-        }
-
-        // 移除 "- Diablo II: Resurrected" 后缀
-        let main_part = title.trim_end_matches("- Diablo II: Resurrected").trim().trim_end_matches('-').trim();
-
-        // 解析格式: "[ID] Name (Region)"
-        // 提取 [ID]
-        if !main_part.starts_with('[') {
-            return None;
-        }
-        
-        let close_bracket = main_part.find(']')?;
-        let account_id = main_part[1..close_bracket].to_string();
-        let remainder = main_part[close_bracket + 1..].trim();
-
-        // 提取 Name 和 Region: "Name (Region)"
-        if let Some(paren_pos) = remainder.rfind('(') {
-            let account_name = remainder[..paren_pos].trim().to_string();
-            let region_part = &remainder[paren_pos + 1..];
-            if let Some(close_paren) = region_part.find(')') {
-                let region = region_part[..close_paren].trim().to_string();
-                println!("✅ 解析窗口标题成功: ID={}, Name={}, Region={}", account_id, account_name, region);
-                return Some((account_id, account_name, region));
-            }
-        }
-        
-        println!("❌ 解析窗口标题失败: {}", title);
-        None
     }
 
     /// 获取当前运行的游戏实例
@@ -245,35 +245,21 @@ pub fn get_game_status(
 /// Tauri 命令：启动游戏监控
 #[tauri::command]
 pub fn start_game_monitoring(
-    app: tauri::State<'_, Arc<Mutex<Option<GameMonitor>>>>,
+    app: tauri::State<'_, Arc<Mutex<GameMonitor>>>,
 ) -> Result<(), String> {
-    let mut monitor_guard = app.lock().map_err(|e| e.to_string())?;
-
-    if monitor_guard.is_none() {
-        return Err("游戏监控器未初始化".to_string());
-    }
-
-    if let Some(monitor) = monitor_guard.as_mut() {
-        monitor.start_monitoring();
-        Ok(())
-    } else {
-        Err("无法启动监控".to_string())
-    }
+    let monitor = app.lock().map_err(|e| e.to_string())?;
+    monitor.start_monitoring();
+    Ok(())
 }
 
 /// Tauri 命令：停止游戏监控
 #[tauri::command]
 pub fn stop_game_monitoring(
-    app: tauri::State<'_, Arc<Mutex<Option<GameMonitor>>>>,
+    app: tauri::State<'_, Arc<Mutex<GameMonitor>>>,
 ) -> Result<(), String> {
-    let monitor_guard = app.lock().map_err(|e| e.to_string())?;
-
-    if let Some(monitor) = monitor_guard.as_ref() {
-        monitor.stop_monitoring();
-        Ok(())
-    } else {
-        Err("游戏监控器未初始化".to_string())
-    }
+    let monitor = app.lock().map_err(|e| e.to_string())?;
+    monitor.stop_monitoring();
+    Ok(())
 }
 
 /// Tauri 命令：关闭指定进程

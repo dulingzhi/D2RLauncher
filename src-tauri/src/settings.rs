@@ -14,6 +14,9 @@ pub struct Settings {
     /// 登录检测超时时间（秒）
     #[serde(default = "default_login_timeout")]
     pub login_timeout_secs: u64,
+    /// 是否修改游戏窗口标题为账号名称（方便识别）
+    #[serde(default = "default_rename_window")]
+    pub rename_window: bool,
 }
 
 fn default_wait_for_login() -> bool {
@@ -24,6 +27,10 @@ fn default_login_timeout() -> u64 {
     60 // 60秒超时
 }
 
+fn default_rename_window() -> bool {
+    true
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -32,6 +39,7 @@ impl Default for Settings {
             launch_delay_secs: 5,
             wait_for_login: true,
             login_timeout_secs: 60,
+            rename_window: true,
         }
     }
 }

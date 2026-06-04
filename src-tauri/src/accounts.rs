@@ -45,6 +45,8 @@ pub fn add_account(
     custom_args: String,
     window_x: Option<i32>,
     window_y: Option<i32>,
+    window_width: Option<i32>,
+    window_height: Option<i32>,
 ) -> Result<Account, String> {
     let mut accounts = load_accounts(&app);
     let account = Account {
@@ -56,6 +58,8 @@ pub fn add_account(
         custom_args,
         window_x,
         window_y,
+        window_width,
+        window_height,
     };
     accounts.push(account.clone());
     save_accounts(&app, &accounts)?;

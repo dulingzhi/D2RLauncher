@@ -1,7 +1,8 @@
 use std::process::Command;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 use crate::token::{dpapi_decrypt_token, write_token_to_registry};
 use crate::accounts;
@@ -12,7 +13,7 @@ use crate::embedded_resources;
 #[cfg(windows)]
 use windows::Win32::Foundation::HWND;
 #[cfg(windows)]
-use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId, SetWindowTextW};
+use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId, SetWindowTextW, SetWindowPos, SWP_NOZORDER, HWND_TOP, GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
 #[cfg(windows)]
 use windows::core::PCWSTR;
 
@@ -72,10 +73,20 @@ pub fn launch_account(
     
     println!("🎮 游戏进程已启动，PID: {}", pid);
 
+    // 立即注册 PID 到 game_monitor（不需要等待窗口初始化）
+    if let Some(monitor) = app.try_state::<Arc<Mutex<crate::game_monitor::GameMonitor>>>() {
+        if let Ok(mon) = monitor.lock() {
+            mon.register_game_process(pid, account.id.clone(), account.label.clone(), "cn".to_string());
+        }
+    } else {
+        eprintln!("⚠️ 无法获取 game_monitor 锁，PID 注册失败");
+    }
+
     // 获取设置
     let settings = settings::get_settings(app.clone());
     let wait_for_login = settings.wait_for_login;
     let login_timeout = settings.login_timeout_secs;
+    let rename_window = settings.rename_window;
 
     // 5. 获取内置的 handle64.exe 路径
     let handle_path = embedded_resources::get_handle64_path()
@@ -87,7 +98,10 @@ pub fn launch_account(
     // 6. 后台线程：重命名窗口、等待并杀互斥锁句柄、监控登录状态
     let account_id_clone = account.id.clone();
     let account_name_clone = account.label.clone();
-    let region_clone = "cn".to_string();
+    let window_x = account.window_x;
+    let window_y = account.window_y;
+    let window_width = account.window_width;
+    let window_height = account.window_height;
     let app_clone = app.clone();
     
     thread::spawn(move || {
@@ -95,24 +109,42 @@ pub fn launch_account(
         println!("⏰ 等待游戏窗口出现...");
         thread::sleep(Duration::from_secs(5));
         
-        // 重命名游戏窗口（不依赖 handle.exe）
-        #[cfg(windows)]
-        {
-            let new_title = format!(
-                "[{}] {} ({}) - Diablo II: Resurrected",
-                account_id_clone, account_name_clone, region_clone
-            );
-            println!("🏷️  尝试重命名窗口为: {}", new_title);
-            
-            match rename_d2r_window(pid, &new_title) {
-                Ok(_) => {
-                    println!("✅ 窗口重命名成功");
-                    // 立即触发一次游戏监控检查
-                    thread::sleep(Duration::from_millis(500));
-                    let _ = app_clone.emit("force_game_check", ());
+        // 重命名游戏窗口（可选功能，仅在启用时执行）
+        if rename_window {
+            #[cfg(windows)]
+            {
+                // 新标题格式：直接使用账号名称，方便识别
+                let new_title = format!("{} - Diablo II: Resurrected", account_name_clone);
+                println!("🏷️  尝试重命名窗口为: {}", new_title);
+                
+                match rename_d2r_window(pid, &new_title) {
+                    Ok(_) => {
+                        println!("✅ 窗口重命名成功");
+                    }
+                    Err(e) => {
+                        eprintln!("❌ 重命名窗口失败: {}", e);
+                    }
                 }
-                Err(e) => {
-                    eprintln!("❌ 重命名窗口失败: {}", e);
+            }
+        } else {
+            println!("⏭️  窗口重命名已禁用");
+        }
+        
+        // 设置窗口位置和大小（如果配置了的话）
+        // 等待额外 3 秒，让游戏自己设置好窗口尺寸后再修改
+        if window_x.is_some() || window_y.is_some() || window_width.is_some() || window_height.is_some() {
+            println!("⏰ 等待游戏初始化窗口尺寸...");
+            thread::sleep(Duration::from_secs(3));
+            
+            #[cfg(windows)]
+            {
+                match set_window_position_and_size(pid, window_x, window_y, window_width, window_height) {
+                    Ok(_) => {
+                        println!("✅ 窗口位置和大小设置成功");
+                    }
+                    Err(e) => {
+                        eprintln!("❌ 设置窗口位置和大小失败: {}", e);
+                    }
                 }
             }
         }
@@ -308,4 +340,87 @@ unsafe extern "system" fn find_window_callback(
     }
 
     windows::Win32::Foundation::BOOL(1) // 继续枚举
+}
+
+/// Windows 下设置窗口位置和大小
+#[cfg(windows)]
+fn set_window_position_and_size(
+    target_pid: u32, 
+    x: Option<i32>, 
+    y: Option<i32>, 
+    width: Option<i32>, 
+    height: Option<i32>
+) -> Result<(), String> {
+    use std::sync::{Arc, Mutex};
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
+    use windows::Win32::Foundation::RECT;
+    
+    let target_hwnd: Arc<Mutex<Option<HWND>>> = Arc::new(Mutex::new(None));
+    let target_hwnd_clone = Arc::clone(&target_hwnd);
+
+    println!("🔍 查找进程 PID {} 的窗口以设置位置和大小...", target_pid);
+
+    // 查找目标进程的窗口句柄
+    unsafe {
+        let _ = EnumWindows(
+            Some(find_window_callback),
+            windows::Win32::Foundation::LPARAM(
+                Box::into_raw(Box::new((target_pid, target_hwnd_clone))) as isize
+            ),
+        );
+    }
+
+    // 如果找到窗口，设置位置和大小
+    let found_hwnd = {
+        let guard = target_hwnd.lock().unwrap();
+        *guard
+    };
+    
+    if let Some(hwnd) = found_hwnd {
+        unsafe {
+            // 获取当前窗口位置和大小
+            let mut rect = RECT::default();
+            GetWindowRect(hwnd, &mut rect).map_err(|e| format!("GetWindowRect 失败: {:?}", e))?;
+            
+            let current_width = rect.right - rect.left;
+            let current_height = rect.bottom - rect.top;
+            
+            // 使用配置的值或保持当前值
+            let final_width = width.unwrap_or(current_width);
+            let final_height = height.unwrap_or(current_height);
+            
+            // 计算位置
+            let (final_x, final_y) = if x.is_none() || y.is_none() {
+                // 居中显示
+                let screen_width = GetSystemMetrics(SM_CXSCREEN);
+                let screen_height = GetSystemMetrics(SM_CYSCREEN);
+                let centered_x = (screen_width - final_width) / 2;
+                let centered_y = (screen_height - final_height) / 2;
+                
+                (
+                    x.unwrap_or(centered_x),
+                    y.unwrap_or(centered_y)
+                )
+            } else {
+                (x.unwrap(), y.unwrap())
+            };
+            
+            println!("📐 设置窗口: x={}, y={}, width={}, height={}", final_x, final_y, final_width, final_height);
+            
+            SetWindowPos(
+                hwnd,
+                HWND_TOP,
+                final_x,
+                final_y,
+                final_width,
+                final_height,
+                SWP_NOZORDER
+            ).map_err(|e| format!("SetWindowPos 失败: {:?}", e))?;
+        }
+        
+        println!("✅ 窗口位置和大小设置成功");
+        Ok(())
+    } else {
+        Err(format!("未找到进程 {} 的游戏窗口", target_pid))
+    }
 }

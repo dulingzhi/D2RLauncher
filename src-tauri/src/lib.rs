@@ -23,7 +23,7 @@ pub fn run() {
         .setup(|app| {
             // 初始化游戏监控器
             let monitor = game_monitor::GameMonitor::new(app.handle().clone());
-            app.manage(Arc::new(Mutex::new(Some(monitor))));
+            app.manage(Arc::new(Mutex::new(monitor)));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

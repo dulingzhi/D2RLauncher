@@ -8,6 +8,8 @@ export interface Account {
   custom_args: string
   window_x: number | null
   window_y: number | null
+  window_width: number | null
+  window_height: number | null
 }
 
 export interface Settings {
@@ -16,6 +18,7 @@ export interface Settings {
   launch_delay_secs: number
   wait_for_login: boolean
   login_timeout_secs: number
+  rename_window: boolean
 }
 
 export function tokenAge(token_set_at: number | null): string {
