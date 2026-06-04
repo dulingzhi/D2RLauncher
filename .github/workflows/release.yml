@@ -83,34 +83,34 @@ jobs:
             $prevTag = git rev-list --max-parents=0 HEAD
           }
           
-          # 生成 changelog
-          $changelog = git log "$prevTag..HEAD" --pretty=format:"- %s" --no-merges
+          # 生成 changelog（每行一个元素的数组）
+          $changelogLines = git log "$prevTag..HEAD" --pretty=format:"- %s" --no-merges
           
           # 如果没有新提交，使用默认信息
-          if ([string]::IsNullOrWhiteSpace($changelog)) {
-            $changelog = "- 初始版本发布"
+          if ([string]::IsNullOrWhiteSpace($changelogLines)) {
+            $changelogLines = "- 初始版本发布"
           }
           
+          # 将数组转换为带换行符的字符串
+          $changelogText = $changelogLines -join "`n"
+          
           # 保存 changelog（用于 latest.json）
-          $changelog | Out-File -FilePath changelog.txt -Encoding utf8
+          $changelogText | Out-File -FilePath changelog.txt -Encoding utf8
           
           # 生成完整的 release body
           $version = "${{ github.ref_name }}"
-          $releaseBody = @"
-          ## D2R CN 多开启动器 $version
           
-          ### 更新内容
-          $changelog
-          
-          ### 下载说明
-          - Windows 用户请下载 ``d2r-launcher.exe`` 文件，无需安装直接运行
-          - **已使用 UPX 压缩**，体积约 4 MB，启动速度不受影响
-          - 首次运行需要设置游戏路径
-          - 程序支持自动更新，下次有新版本会自动提示
-          
-          ### 系统要求
-          - Windows 10/11 x64
-          "@
+          # 使用 StringBuilder 构建 release body 以确保换行符正确
+          $releaseBody = "## D2R CN 多开启动器 $version`n`n"
+          $releaseBody += "### 更新内容`n"
+          $releaseBody += $changelogText + "`n`n"
+          $releaseBody += "### 下载说明`n"
+          $releaseBody += "- Windows 用户请下载 ``d2r-launcher.exe`` 文件，无需安装直接运行`n"
+          $releaseBody += "- **已使用 UPX 压缩**，体积约 4 MB，启动速度不受影响`n"
+          $releaseBody += "- 首次运行需要设置游戏路径`n"
+          $releaseBody += "- 程序支持自动更新，下次有新版本会自动提示`n`n"
+          $releaseBody += "### 系统要求`n"
+          $releaseBody += "- Windows 10/11 x64"
           
           # 保存 release body 到文件
           $releaseBody | Out-File -FilePath release-body.txt -Encoding utf8
@@ -159,7 +159,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          draft: true
+          draft: false
           files: |
             src-tauri/target/release/d2r-launcher.exe
             latest.json
