@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "login-window",
+  "description": "Permissions for the Battle.net login window",
+  "windows": ["login"],
+  "permissions": [
+    "core:window:allow-create",
+    "core:window:allow-close",
+    "core:webview:allow-webview-position",
+    "core:webview:allow-webview-size"
+  ]
+}

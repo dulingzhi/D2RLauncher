@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://account.battlenet.com.cn https://*.battlenet.com.cn; script-src 'unsafe-inline'; style-src 'unsafe-inline';">
+    <title>Battle.net CN 登录</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+        iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            font-family: sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <div id="loading">
+        <h2>正在加载 Battle.net 登录页面...</h2>
+        <p>如果页面长时间未加载，请检查网络连接</p>
+    </div>
+    <iframe id="loginFrame" src="about:blank" style="display:none;"></iframe>
+    <script>
+        const iframe = document.getElementById('loginFrame');
+        const loading = document.getElementById('loading');
+        
+        iframe.onload = function() {
+            loading.style.display = 'none';
+            iframe.style.display = 'block';
+        };
+        
+        // Load Battle.net login page
+        setTimeout(() => {
+            iframe.src = 'https://account.battlenet.com.cn/login/zh/?externalChallenge=login&app=OSI';
+        }, 100);
+    </script>
+</body>
+</html>

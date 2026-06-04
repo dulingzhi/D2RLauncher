@@ -1,0 +1,35 @@
+pub mod models;
+pub mod accounts;
+pub mod token;
+pub mod token_browser;
+pub mod launcher;
+pub mod settings;
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_fs::init())
+        .invoke_handler(tauri::generate_handler![
+            // accounts
+            accounts::get_accounts,
+            accounts::add_account,
+            accounts::update_account,
+            accounts::delete_account,
+            accounts::save_token_for_account,
+            // token
+            token::open_login_window,
+            token::write_token_to_registry,
+            token_browser::open_login_with_server,
+            token_browser::open_login_with_navigation,
+            // launcher
+            launcher::launch_account,
+            launcher::launch_all_accounts,
+            // settings
+            settings::get_settings,
+            settings::save_settings,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}

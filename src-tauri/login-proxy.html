@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Token 提取工具</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 16px;
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 24px;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+        .steps {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+        .step {
+            margin-bottom: 15px;
+            display: flex;
+            align-items: flex-start;
+        }
+        .step-number {
+            background: #667eea;
+            color: white;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: bold;
+            margin-right: 12px;
+            flex-shrink: 0;
+        }
+        .step-text {
+            color: #444;
+            line-height: 1.6;
+            font-size: 14px;
+        }
+        .highlight {
+            background: #fef3c7;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Consolas', monospace;
+            font-size: 13px;
+        }
+        .input-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            color: #555;
+            font-weight: 500;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            transition: all 0.3s;
+        }
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        .button-group {
+            display: flex;
+            gap: 12px;
+        }
+        button {
+            flex: 1;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+        }
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .btn-secondary {
+            background: #f3f4f6;
+            color: #666;
+        }
+        .btn-secondary:hover {
+            background: #e5e7eb;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            display: none;
+        }
+        .status.success {
+            background: #d1fae5;
+            color: #065f46;
+            border: 1px solid #6ee7b7;
+            display: block;
+        }
+        .status.error {
+            background: #fee2e2;
+            color: #991b1b;
+            border: 1px solid #fca5a5;
+            display: block;
+        }
+        .open-link {
+            display: inline-block;
+            margin-top: 20px;
+            padding: 10px 20px;
+            background: #10b981;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+        .open-link:hover {
+            background: #059669;
+            transform: translateY(-1px);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 Battle.net Token 提取</h1>
+        <p class="subtitle">请按照以下步骤操作</p>
+        
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-text">
+                    点击下方按钮，在浏览器中打开 Battle.net 登录页面
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-text">
+                    完成登录后，页面会跳转到一个错误页面（这是正常现象）
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-text">
+                    <strong>复制浏览器地址栏的完整 URL</strong>（包含 <span class="highlight">ST=</span> 的那个地址）
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-number">4</span>
+                <div class="step-text">
+                    将 URL 粘贴到下方输入框，点击提取按钮
+                </div>
+            </div>
+        </div>
+
+        <a href="https://account.battlenet.com.cn/login/zh/?externalChallenge=login&app=OSI" 
+           target="_blank" 
+           class="open-link">
+            🌐 在浏览器中打开登录页面
+        </a>
+
+        <div class="input-group" style="margin-top: 30px;">
+            <label for="urlInput">粘贴包含 Token 的 URL：</label>
+            <input 
+                type="text" 
+                id="urlInput" 
+                placeholder="例如：http://localhost:0/?ST=CN-xxxxx...&flowTrackingId=..."
+                autocomplete="off"
+            />
+        </div>
+
+        <div class="button-group">
+            <button class="btn-primary" id="extractBtn" onclick="extractToken()">
+                ✨ 提取 Token
+            </button>
+            <button class="btn-secondary" onclick="clearInput()">
+                🔄 清空
+            </button>
+        </div>
+
+        <div id="status" class="status"></div>
+    </div>
+
+    <script>
+        const urlInput = document.getElementById('urlInput');
+        const extractBtn = document.getElementById('extractBtn');
+        const status = document.getElementById('status');
+
+        // 监听输入变化
+        urlInput.addEventListener('input', () => {
+            extractBtn.disabled = !urlInput.value.trim();
+        });
+
+        // 提取 token
+        function extractToken() {
+            const urlText = urlInput.value.trim();
+            
+            if (!urlText) {
+                showStatus('请先粘贴 URL', 'error');
+                return;
+            }
+
+            try {
+                // 尝试解析 URL
+                let url;
+                try {
+                    url = new URL(urlText);
+                } catch {
+                    // 如果无法解析完整 URL，尝试提取 query string
+                    const match = urlText.match(/[?&]ST=([^&]+)/);
+                    if (match) {
+                        const token = match[1];
+                        sendToken(token);
+                        return;
+                    }
+                    throw new Error('无法解析 URL');
+                }
+
+                // 从 URL 中获取 ST 参数
+                const token = url.searchParams.get('ST');
+                
+                if (!token) {
+                    showStatus('❌ 未找到 Token（ST 参数）', 'error');
+                    return;
+                }
+
+                sendToken(token);
+                
+            } catch (error) {
+                showStatus('❌ 提取失败：' + error.message, 'error');
+            }
+        }
+
+        // 发送 token 到后端
+        function sendToken(token) {
+            console.log('提取到 token:', token);
+            showStatus('✅ Token 提取成功：' + token.substring(0, 20) + '...', 'success');
+
+            // 通过 HTTP 发送到本地服务器
+            const port = window.location.port || '31888';
+            fetch(`http://localhost:${port}/submit-token`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ token: token })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showStatus('✅ Token 已提交成功！窗口将在 2 秒后关闭...', 'success');
+                    setTimeout(() => window.close(), 2000);
+                } else {
+                    showStatus('❌ 提交失败：' + (data.error || '未知错误'), 'error');
+                }
+            })
+            .catch(error => {
+                showStatus('⚠️ 无法连接到应用，请手动关闭此窗口', 'error');
+                console.error('提交失败:', error);
+            });
+        }
+
+        // 显示状态消息
+        function showStatus(message, type) {
+            status.textContent = message;
+            status.className = 'status ' + type;
+        }
+
+        // 清空输入
+        function clearInput() {
+            urlInput.value = '';
+            extractBtn.disabled = true;
+            status.style.display = 'none';
+        }
+
+        // 支持回车键提交
+        urlInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && urlInput.value.trim()) {
+                extractToken();
+            }
+        });
+
+        // 初始状态
+        extractBtn.disabled = true;
+    </script>
+</body>
+</html>
