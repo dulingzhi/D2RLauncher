@@ -91,12 +91,31 @@ jobs:
             $changelog = "- 初始版本发布"
           }
           
-          # 输出到文件
+          # 保存 changelog（用于 latest.json）
           $changelog | Out-File -FilePath changelog.txt -Encoding utf8
           
-          # 设置输出变量（转义换行符）
-          $changelogEscaped = $changelog -replace "`r`n", "%0A" -replace "`n", "%0A"
-          "changelog=$changelogEscaped" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          # 生成完整的 release body
+          $version = "${{ github.ref_name }}"
+          $releaseBody = @"
+          ## D2R CN 多开启动器 $version
+          
+          ### 更新内容
+          $changelog
+          
+          ### 下载说明
+          - Windows 用户请下载 ``d2r-launcher.exe`` 文件，无需安装直接运行
+          - **已使用 UPX 压缩**，体积约 4 MB，启动速度不受影响
+          - 首次运行需要设置游戏路径
+          - 程序支持自动更新，下次有新版本会自动提示
+          
+          ### 系统要求
+          - Windows 10/11 x64
+          "@
+          
+          # 保存 release body 到文件
+          $releaseBody | Out-File -FilePath release-body.txt -Encoding utf8
+          Write-Host "Generated release body:"
+          Get-Content release-body.txt
 
       - name: Generate latest.json for Tauri updater
         run: |
@@ -144,20 +163,7 @@ jobs:
           files: |
             src-tauri/target/release/d2r-launcher.exe
             latest.json
-          body: |
-            ## D2R CN 多开启动器 ${{ github.ref_name }}
-            
-            ### 更新内容
-            ${{ steps.changelog.outputs.changelog }}
-            
-            ### 下载说明
-            - Windows 用户请下载 `d2r-launcher.exe` 文件，无需安装直接运行
-            - **已使用 UPX 压缩**，体积约 4 MB，启动速度不受影响
-            - 首次运行需要设置游戏路径
-            - 程序支持自动更新，下次有新版本会自动提示
-            
-            ### 系统要求
-            - Windows 10/11 x64
+          body_path: release-body.txt
             - 暗黑破坏神II：重制版（国服）
             
             ### 技术说明
