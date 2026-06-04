@@ -133,6 +133,12 @@ pub fn launch_account(
             match token_monitor::wait_for_login_complete(login_timeout) {
                 Ok(true) => {
                     println!("✅ {} 登录完成！", account_name_clone);
+                    
+                    // 等待 3 秒，确保 game_monitor 有足够时间检测到窗口标题变化
+                    // game_monitor 每 2 秒检查一次，等待 3 秒可以确保至少执行了一次完整的检查
+                    println!("⏰ 等待游戏状态更新...");
+                    thread::sleep(Duration::from_secs(3));
+                    
                     let _ = app_clone.emit("login_complete", serde_json::json!({
                         "account_id": account_id_clone,
                         "account_name": account_name_clone,
