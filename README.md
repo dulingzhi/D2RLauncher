@@ -239,16 +239,62 @@ d2r-launcher/
    - 将 GitHub 仓库 URL 替换为实际地址
 
 ### 发布新版本
-1. 更新 `src-tauri/tauri.conf.json` 中的 `version` 字段
-2. 提交代码并打 tag：
+1. **更新版本号**
+   ```bash
+   # 编辑 src-tauri/tauri.conf.json，修改 version 字段
+   # 例如: "version": "0.2.0"
+   ```
+
+2. **提交代码并打标签**
    ```bash
    git add .
-   git commit -m "chore: bump version to x.x.x"
-   git tag vx.x.x
-   git push origin master --tags
+   git commit -m "chore: bump version to 0.2.0"
+   git tag v0.2.0
+   git push origin main --tags
    ```
-3. GitHub Actions 自动构建并创建 Draft Release
-4. 编辑 Release 说明并发布
+
+3. **自动构建流程**
+   - GitHub Actions 自动触发构建
+   - 自动生成更新日志（基于 git commit 历史）
+   - 使用 UPX 压缩 exe（从 17MB 压缩到 4MB）
+   - 生成 `latest.json` 文件供 Tauri Updater 使用
+   - 创建 Draft Release，包含：
+     - `d2r-launcher.exe` - 压缩后的可执行文件
+     - `latest.json` - 更新配置文件
+     - 自动生成的更新日志
+
+4. **发布 Release**
+   - 前往 GitHub Releases 页面
+   - 检查自动生成的更新日志
+   - 根据需要编辑说明
+   - 点击 "Publish release"
+
+### 更新日志规范
+为了更好地自动生成更新日志，建议遵循以下 commit message 规范：
+- `feat:` - 新功能
+- `fix:` - Bug 修复
+- `perf:` - 性能优化
+- `docs:` - 文档更新
+- `style:` - 代码格式调整
+- `refactor:` - 代码重构
+- `test:` - 测试相关
+- `chore:` - 构建/工具配置
+
+示例：
+```bash
+git commit -m "feat: 添加批量导入账号功能"
+git commit -m "fix: 修复登录超时导致程序卡死的问题"
+git commit -m "perf: 优化进程监控性能,降低 CPU 占用"
+```
+
+### Tauri Updater 工作流程
+1. **应用启动** - 自动检查更新（后台进行）
+2. **发现新版本** - 弹出对话框询问是否更新
+3. **下载更新** - 从 GitHub Release 下载新版本
+4. **验证签名** - 使用公钥验证文件完整性
+5. **安装更新** - 替换旧版本，重启应用
+
+用户无需手动下载，应用会自动处理整个更新流程。
 
 ---
 

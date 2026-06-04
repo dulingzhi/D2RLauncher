@@ -71,6 +71,69 @@ jobs:
           Write-Host "Compressed size: $([math]::Round($compressedSize/1MB, 2)) MB"
           Write-Host "Compression ratio: $([math]::Round(($originalSize - $compressedSize) / $originalSize * 100, 2))%"
 
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # 获取上一个 tag
+          $prevTag = git describe --tags --abbrev=0 HEAD^ 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            # 如果是第一个 tag，从第一个 commit 开始
+            $prevTag = git rev-list --max-parents=0 HEAD
+          }
+          
+          # 生成 changelog
+          $changelog = git log "$prevTag..HEAD" --pretty=format:"- %s" --no-merges
+          
+          # 如果没有新提交，使用默认信息
+          if ([string]::IsNullOrWhiteSpace($changelog)) {
+            $changelog = "- 初始版本发布"
+          }
+          
+          # 输出到文件
+          $changelog | Out-File -FilePath changelog.txt -Encoding utf8
+          
+          # 设置输出变量（转义换行符）
+          $changelogEscaped = $changelog -replace "`r`n", "%0A" -replace "`n", "%0A"
+          "changelog=$changelogEscaped" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Generate latest.json for Tauri updater
+        run: |
+          $version = "${{ github.ref_name }}"
+          $exePath = "src-tauri\target\release\d2r-launcher.exe"
+          $sigPath = "$exePath.sig"
+          
+          # 读取签名文件
+          if (Test-Path $sigPath) {
+            $signature = Get-Content $sigPath -Raw
+          } else {
+            Write-Warning "Signature file not found at $sigPath"
+            $signature = ""
+          }
+          
+          # 读取 changelog
+          $notes = Get-Content changelog.txt -Raw -Encoding utf8
+          
+          # 获取当前 UTC 时间
+          $pubDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+          
+          # 生成 JSON
+          $json = @{
+            version = $version
+            notes = $notes
+            pub_date = $pubDate
+            platforms = @{
+              "windows-x86_64" = @{
+                signature = $signature.Trim()
+                url = "https://github.com/dulingzhi/D2RLauncher/releases/download/$version/d2r-launcher.exe"
+              }
+            }
+          } | ConvertTo-Json -Depth 10
+          
+          # 保存到文件
+          $json | Out-File -FilePath latest.json -Encoding utf8
+          Write-Host "Generated latest.json:"
+          Get-Content latest.json
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
@@ -78,19 +141,26 @@ jobs:
           draft: true
           files: |
             src-tauri/target/release/d2r-launcher.exe
+            latest.json
           body: |
             ## D2R CN 多开启动器 ${{ github.ref_name }}
             
-            ### 新功能
-            - 请在此处添加版本更新说明
+            ### 更新内容
+            ${{ steps.changelog.outputs.changelog }}
             
             ### 下载说明
             - Windows 用户请下载 `d2r-launcher.exe` 文件，无需安装直接运行
-            - **已使用 UPX 压缩**，体积更小，启动速度不受影响
+            - **已使用 UPX 压缩**，体积约 4 MB，启动速度不受影响
             - 首次运行需要设置游戏路径
+            - 程序支持自动更新，下次有新版本会自动提示
             
             ### 系统要求
             - Windows 10/11 x64
             - 暗黑破坏神II：重制版（国服）
+            
+            ### 技术说明
+            - 原始体积: 17.5 MB
+            - 压缩后: 3.9 MB
+            - 压缩率: 77.7%
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
