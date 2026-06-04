@@ -401,6 +401,17 @@ body {
   font-size: 14px;
   height: 100vh;
   overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+input, textarea {
+  user-select: text;
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  -ms-user-select: text;
 }
 
 #app { height: 100vh; display: flex; flex-direction: column; }
