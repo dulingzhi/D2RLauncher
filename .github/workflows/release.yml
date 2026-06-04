@@ -40,16 +40,45 @@ jobs:
       - name: Install frontend dependencies
         run: bun install
 
-      - name: Build the app
-        uses: tauri-apps/tauri-action@v0
+      - name: Build frontend
+        run: bun run build
+
+      - name: Build Tauri app
+        run: |
+          cd src-tauri
+          cargo build --release --verbose
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Install UPX
+        run: |
+          $upxVersion = "4.2.4"
+          $upxUrl = "https://github.com/upx/upx/releases/download/v$upxVersion/upx-$upxVersion-win64.zip"
+          Invoke-WebRequest -Uri $upxUrl -OutFile upx.zip
+          Expand-Archive upx.zip -DestinationPath .
+          Move-Item "upx-$upxVersion-win64\upx.exe" upx.exe
+
+      - name: Compress with UPX
+        run: |
+          $exePath = "src-tauri\target\release\d2r-launcher.exe"
+          $originalSize = (Get-Item $exePath).Length
+          Write-Host "Original size: $([math]::Round($originalSize/1MB, 2)) MB"
+          
+          .\upx.exe --best --lzma $exePath
+          
+          $compressedSize = (Get-Item $exePath).Length
+          Write-Host "Compressed size: $([math]::Round($compressedSize/1MB, 2)) MB"
+          Write-Host "Compression ratio: $([math]::Round(($originalSize - $compressedSize) / $originalSize * 100, 2))%"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'D2R CN Launcher ${{ github.ref_name }}'
-          releaseBody: |
+          draft: true
+          files: |
+            src-tauri/target/release/d2r-launcher.exe
+          body: |
             ## D2R CN 多开启动器 ${{ github.ref_name }}
             
             ### 新功能
@@ -57,11 +86,11 @@ jobs:
             
             ### 下载说明
             - Windows 用户请下载 `d2r-launcher.exe` 文件，无需安装直接运行
+            - **已使用 UPX 压缩**，体积更小，启动速度不受影响
             - 首次运行需要设置游戏路径
             
             ### 系统要求
             - Windows 10/11 x64
             - 暗黑破坏神II：重制版（国服）
-          releaseDraft: true
-          prerelease: false
-          args: --verbose
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
