@@ -2,6 +2,8 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { check } from '@tauri-apps/plugin-updater'
+import { relaunch } from '@tauri-apps/plugin-process'
 import AccountCard from './components/AccountCard.vue'
 import AccountModal from './components/AccountModal.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
@@ -45,6 +47,53 @@ async function loadAccounts() {
 const runningCount = computed(() => runningGames.value.size)
 
 onMounted(async () => {
+  // 检查更新（仅在生产环境）
+  if (import.meta.env.PROD) {
+    try {
+      console.log('🔍 正在检查更新...')
+      const update = await check()
+      if (update) {
+        console.log(`🆕 发现新版本 ${update.version}，当前版本需要更新`)
+        const confirmed = confirm(
+          `发现新版本 ${update.version}！\n\n更新内容：\n${update.body}\n\n是否立即下载并安装？`
+        )
+        
+        if (confirmed) {
+          console.log('⏬ 开始下载更新...')
+          let downloaded = 0
+          let contentLength = 0
+          
+          await update.downloadAndInstall((event) => {
+            switch (event.event) {
+              case 'Started':
+                contentLength = event.data.contentLength || 0
+                console.log(`📦 开始下载，文件大小: ${(contentLength / 1024 / 1024).toFixed(2)} MB`)
+                break
+              case 'Progress':
+                downloaded += event.data.chunkLength
+                const percent = contentLength > 0 ? ((downloaded / contentLength) * 100).toFixed(0) : '0'
+                console.log(`⏬ 下载进度: ${percent}%`)
+                break
+              case 'Finished':
+                console.log('✅ 下载完成，准备安装...')
+                break
+            }
+          })
+          
+          console.log('🔄 更新安装完成，正在重启应用...')
+          await relaunch()
+        }
+      } else {
+        console.log('✅ 当前已是最新版本')
+      }
+    } catch (error) {
+      // 静默处理更新检查失败（可能是网络问题或尚未发布版本）
+      console.log('ℹ️ 无法检查更新（可能是网络问题或首次发布）')
+    }
+  } else {
+    console.log('ℹ️ 开发模式下跳过更新检查')
+  }
+  
   await loadAccounts()
   
   // 监听游戏状态更新
