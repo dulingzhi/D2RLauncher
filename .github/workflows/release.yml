@@ -164,11 +164,5 @@ jobs:
             src-tauri/target/release/d2r-launcher.exe
             latest.json
           body_path: release-body.txt
-            - 暗黑破坏神II：重制版（国服）
-            
-            ### 技术说明
-            - 原始体积: 17.5 MB
-            - 压缩后: 3.9 MB
-            - 压缩率: 77.7%
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
