@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import AccountCard from './components/AccountCard.vue'
 import AccountModal from './components/AccountModal.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
@@ -8,18 +9,124 @@ import type { Account } from './types'
 
 type Tab = 'accounts' | 'settings'
 
+interface GameInstance {
+  account_id: string
+  account_name: string
+  region: string
+  process_id: number
+  window_title: string
+  start_time: string
+  total_seconds: number
+}
+
+interface GameStatus {
+  running_instances: GameInstance[]
+  total_running: number
+}
+
 const tab = ref<Tab>('accounts')
 const accounts = ref<Account[]>([])
 const showModal = ref(false)
 const editingAccount = ref<Account | null>(null)
 const batchLaunching = ref(false)
 const batchMsg = ref('')
+const runningGames = ref<Map<string, GameInstance>>(new Map())
+const launchQueue = ref<string[]>([])  // 启动队列
+const currentLaunching = ref<string | null>(null)  // 当前正在启动的账号ID
+const waitingForLogin = ref<{ accountId: string; accountName: string } | null>(null)  // 正在等待登录的账号
+
+let unlistenGameStatus: UnlistenFn | null = null
+let unlistenLoginComplete: UnlistenFn | null = null
 
 async function loadAccounts() {
   accounts.value = await invoke('get_accounts')
 }
 
-onMounted(loadAccounts)
+const runningCount = computed(() => runningGames.value.size)
+
+onMounted(async () => {
+  await loadAccounts()
+  
+  // 监听游戏状态更新
+  unlistenGameStatus = await listen<GameStatus>('game_status_update', (event) => {
+    const newMap = new Map<string, GameInstance>()
+    event.payload.running_instances.forEach(instance => {
+      newMap.set(instance.account_id, instance)
+    })
+    runningGames.value = newMap
+    
+    // 检测：如果正在等待登录的账号游戏进程消失了，清除遮罩层
+    if (currentLaunching.value && waitingForLogin.value) {
+      const isGameRunning = newMap.has(currentLaunching.value)
+      if (!isGameRunning) {
+        console.log(`⚠️ 检测到正在等待登录的游戏 ${waitingForLogin.value.accountName} 已关闭，清除遮罩层`)
+        waitingForLogin.value = null
+        currentLaunching.value = null
+        
+        // 如果在批量启动中，继续启动下一个
+        if (batchLaunching.value && launchQueue.value.length > 0) {
+          console.log('继续启动队列中的下一个账号...')
+          setTimeout(() => processLaunchQueue(), 1000)
+        } else if (batchLaunching.value) {
+          // 队列为空，结束批量启动
+          batchLaunching.value = false
+          batchMsg.value = '⚠️ 启动中断（游戏被关闭）'
+          setTimeout(() => (batchMsg.value = ''), 3000)
+        }
+      }
+    }
+  })
+  
+  // 监听登录完成事件（用于队列启动）
+  unlistenLoginComplete = await listen<{
+    account_id: string
+    account_name: string
+    success: boolean
+    timeout?: boolean
+    error?: string
+  }>('login_complete', (event) => {
+    console.log('📥 收到登录完成事件:', event.payload)
+    
+    if (event.payload.account_id === currentLaunching.value) {
+      if (event.payload.success) {
+        console.log(`✅ ${event.payload.account_name} 登录完成`)
+      } else if (event.payload.timeout) {
+        console.log(`⏰ ${event.payload.account_name} 登录检测超时，继续启动下一个`)
+      } else {
+        console.log(`⚠️ ${event.payload.account_name} 登录检测失败: ${event.payload.error}`)
+      }
+      
+      // 清除等待登录状态
+      waitingForLogin.value = null
+      
+      // 启动队列中的下一个账号
+      currentLaunching.value = null
+      processLaunchQueue()
+    }
+  })
+  
+  // 启动游戏监控
+  try {
+    await invoke('start_game_monitoring')
+    console.log('🎮 游戏监控已启动')
+  } catch (error) {
+    console.error('启动游戏监控失败:', error)
+  }
+})
+
+onUnmounted(async () => {
+  if (unlistenGameStatus) {
+    unlistenGameStatus()
+  }
+  if (unlistenLoginComplete) {
+    unlistenLoginComplete()
+  }
+  try {
+    await invoke('stop_game_monitoring')
+  } catch (error) {
+    console.error('停止游戏监控失败:', error)
+  }
+})
 
 function openAddModal() {
   editingAccount.value = null
@@ -55,6 +162,103 @@ async function handleDelete(id: string) {
   await loadAccounts()
 }
 
+// 处理单个账号启动（从 AccountCard 发来的事件）
+async function handleLaunchAccount(account: Account) {
+  try {
+    const settings: any = await invoke('get_settings')
+    
+    // 检查游戏路径是否已设置
+    if (!settings.game_path || settings.game_path.trim() === '') {
+      alert('⚠️ 请先设置 D2R.exe 所在目录！')
+      tab.value = 'settings'
+      return
+    }
+    
+    // 显示遮罩层（如果启用了登录检测）
+    if (settings.wait_for_login) {
+      currentLaunching.value = account.id
+      waitingForLogin.value = {
+        accountId: account.id,
+        accountName: account.label
+      }
+    }
+    
+    await invoke('launch_account', {
+      accountId: account.id,
+      gamePath: settings.game_path,
+    })
+    
+    // 如果禁用了登录检测，立即清除状态
+    if (!settings.wait_for_login) {
+      currentLaunching.value = null
+      waitingForLogin.value = null
+    }
+    // 如果启用了登录检测，等待 login_complete 事件来清除状态
+  } catch (e) {
+    console.error('启动失败:', e)
+    alert(`启动失败: ${e}`)
+    currentLaunching.value = null
+    waitingForLogin.value = null
+  }
+}
+
+// 处理启动队列
+async function processLaunchQueue() {
+  if (launchQueue.value.length === 0) {
+    batchLaunching.value = false
+    batchMsg.value = '✅ 全部启动完成'
+    waitingForLogin.value = null  // 清除等待状态
+    setTimeout(() => (batchMsg.value = ''), 3000)
+    return
+  }
+  
+  // 取出队列中的第一个账号
+  const accountId = launchQueue.value.shift()!
+  currentLaunching.value = accountId
+  
+  const account = accounts.value.find(a => a.id === accountId)
+  if (!account) {
+    console.error('账号未找到:', accountId)
+    processLaunchQueue()  // 继续下一个
+    return
+  }
+  
+  const remaining = launchQueue.value.length
+  batchMsg.value = `正在启动: ${account.label}... (剩余 ${remaining} 个)`
+  
+  try {
+    const settings: any = await invoke('get_settings')
+    await invoke('launch_account', {
+      accountId: accountId,
+      gamePath: settings.game_path,
+    })
+    
+    // 如果启用了登录检测，显示等待遮罩
+    if (settings.wait_for_login) {
+      waitingForLogin.value = {
+        accountId: accountId,
+        accountName: account.label
+      }
+    }
+    
+    // 如果禁用了登录检测，延迟后启动下一个
+    if (!settings.wait_for_login) {
+      console.log(`⚠️ 已禁用登录检测，${settings.launch_delay_secs}秒后启动下一个`)
+      await new Promise(resolve => setTimeout(resolve, settings.launch_delay_secs * 1000))
+      currentLaunching.value = null
+      processLaunchQueue()
+    }
+    // 如果启用了登录检测，等待 login_complete 事件触发 processLaunchQueue
+  } catch (e) {
+    console.error('启动失败:', e)
+    batchMsg.value = `❌ ${account.label} 启动失败: ${e}`
+    currentLaunching.value = null
+    waitingForLogin.value = null  // 清除等待状态
+    // 继续启动下一个
+    setTimeout(() => processLaunchQueue(), 2000)
+  }
+}
+
 async function launchAll() {
   const ids = accounts.value
     .filter((a) => a.encrypted_token)
@@ -66,23 +270,32 @@ async function launchAll() {
     return
   }
 
-  batchLaunching.value = true
-  batchMsg.value = `批量启动 ${ids.length} 个账号中...`
+  // 检查游戏路径是否已设置
   try {
     const settings: any = await invoke('get_settings')
-    await invoke('launch_all_accounts', {
-      accountIds: ids,
-      gamePath: settings.game_path,
-      handlePath: settings.handle_path,
-      delaySecs: settings.launch_delay_secs,
-    })
-    batchMsg.value = '✅ 批量启动完成'
+    if (!settings.game_path || settings.game_path.trim() === '') {
+      alert('⚠️ 请先设置 D2R.exe 所在目录！')
+      tab.value = 'settings'
+      return
+    }
   } catch (e) {
-    batchMsg.value = `❌ ${e}`
-  } finally {
-    batchLaunching.value = false
-    setTimeout(() => (batchMsg.value = ''), 4000)
+    console.error('获取设置失败:', e)
+    alert('获取设置失败，请稍后重试')
+    return
   }
+
+  if (batchLaunching.value) {
+    batchMsg.value = '已经在批量启动中...'
+    return
+  }
+
+  // 初始化队列
+  launchQueue.value = [...ids]
+  batchLaunching.value = true
+  batchMsg.value = `准备启动 ${ids.length} 个账号...`
+  
+  // 开始处理队列
+  processLaunchQueue()
 }
 
 const readyCount = () => accounts.value.filter((a) => a.encrypted_token).length
@@ -116,6 +329,7 @@ const readyCount = () => accounts.value.filter((a) => a.encrypted_token).length
         <div class="list-meta">
           共 {{ accounts.length }} 个账号，
           <span class="ready">{{ readyCount() }} 个已配置 Token</span>
+          <span v-if="runningCount > 0" class="running-badge">🎮 {{ runningCount }} 个正在运行</span>
         </div>
         <div class="list-actions">
           <button class="btn btn-secondary" @click="openAddModal">+ 添加账号</button>
@@ -139,9 +353,11 @@ const readyCount = () => accounts.value.filter((a) => a.encrypted_token).length
         v-for="account in accounts"
         :key="account.id"
         :account="account"
+        :running-game="runningGames.get(account.id)"
         @refresh="loadAccounts"
         @edit="openEditModal"
         @delete="handleDelete"
+        @launch="handleLaunchAccount"
       />
     </main>
 
@@ -157,6 +373,21 @@ const readyCount = () => accounts.value.filter((a) => a.encrypted_token).length
       @close="showModal = false"
       @save="handleSave"
     />
+
+    <!-- 等待登录完成遮罩层 -->
+    <transition name="fade">
+      <div v-if="waitingForLogin" class="login-overlay">
+        <div class="login-overlay-content">
+          <div class="spinner"></div>
+          <div class="login-text">
+            <div class="login-title">🔐 正在等待登录完成</div>
+            <div class="login-account">{{ waitingForLogin.accountName }}</div>
+            <div class="login-hint">请在游戏中完成登录并进入角色选择界面</div>
+            <div class="login-warning">⚠️ 在此期间请勿关闭游戏或启动其他账号</div>
+          </div>
+        </div>
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -226,8 +457,22 @@ body {
   align-items: center;
   margin-bottom: 16px;
 }
-.list-meta { font-size: 13px; color: #64748b; }
+.list-meta { 
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px; 
+  color: #64748b; 
+}
 .list-meta .ready { color: #86efac; }
+.list-meta .running-badge {
+  padding: 4px 10px;
+  border-radius: 12px;
+  background: rgba(74, 222, 128, 0.15);
+  color: #4ade80;
+  font-weight: 500;
+  border: 1px solid rgba(74, 222, 128, 0.3);
+}
 .list-actions { display: flex; gap: 8px; }
 
 .batch-msg {
@@ -265,6 +510,108 @@ body {
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #2d3050; border-radius: 3px; }
+
+/* 等待登录遮罩层 */
+.login-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(13, 17, 23, 0.85);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.login-overlay-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  padding: 48px 64px;
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
+  border-radius: 16px;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.spinner {
+  width: 64px;
+  height: 64px;
+  border: 4px solid rgba(59, 130, 246, 0.2);
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.login-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.login-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #f1f5f9;
+  letter-spacing: -0.02em;
+}
+
+.login-account {
+  font-size: 28px;
+  font-weight: 800;
+  color: #60a5fa;
+  text-shadow: 0 0 16px rgba(96, 165, 250, 0.4);
+  letter-spacing: -0.03em;
+}
+
+.login-hint {
+  font-size: 14px;
+  color: #94a3b8;
+  margin-top: 8px;
+}
+
+.login-warning {
+  font-size: 13px;
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.1);
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: 1px solid rgba(251, 191, 36, 0.2);
+  margin-top: 8px;
+}
+
+/* 淡入淡出动画 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
 </style>
 
 

@@ -27,7 +27,8 @@
     "shell:allow-open",
     "fs:default",
     "fs:allow-app-read-recursive",
-    "fs:allow-app-write-recursive"
+    "fs:allow-app-write-recursive",
+    "dialog:allow-open"
   ],
   "remote": {
     "urls": ["https://account.battlenet.com.cn/*"]

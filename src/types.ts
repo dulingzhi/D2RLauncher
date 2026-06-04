@@ -14,6 +14,8 @@ export interface Settings {
   game_path: string
   handle_path: string
   launch_delay_secs: number
+  wait_for_login: boolean
+  login_timeout_secs: number
 }
 
 export function tokenAge(token_set_at: number | null): string {

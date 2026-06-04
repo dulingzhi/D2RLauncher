@@ -4,6 +4,12 @@ pub mod token;
 pub mod token_browser;
 pub mod launcher;
 pub mod settings;
+pub mod game_monitor;
+pub mod token_monitor;
+pub mod embedded_resources;
+
+use std::sync::{Arc, Mutex};
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -11,6 +17,13 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            // 初始化游戏监控器
+            let monitor = game_monitor::GameMonitor::new(app.handle().clone());
+            app.manage(Arc::new(Mutex::new(Some(monitor))));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             // accounts
             accounts::get_accounts,
@@ -29,6 +42,11 @@ pub fn run() {
             // settings
             settings::get_settings,
             settings::save_settings,
+            // game monitor
+            game_monitor::get_game_status,
+            game_monitor::start_game_monitoring,
+            game_monitor::stop_game_monitoring,
+            game_monitor::kill_game_process,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

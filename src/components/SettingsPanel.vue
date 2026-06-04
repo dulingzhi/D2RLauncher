@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { open } from '@tauri-apps/plugin-dialog'
 import type { Settings } from '../types'
 
 const settings = ref<Settings>({
   game_path: '',
   handle_path: '',
   launch_delay_secs: 5,
+  wait_for_login: true,
+  login_timeout_secs: 60,
 })
 const saving = ref(false)
 const saved = ref(false)
@@ -31,6 +34,35 @@ async function save() {
     saving.value = false
   }
 }
+
+async function browsePath() {
+  try {
+    const selected = await open({
+      title: '选择 D2R.exe',
+      multiple: false,
+      directory: false,
+      filters: [{
+        name: 'D2R.exe',
+        extensions: ['exe']
+      }]
+    })
+    
+    if (selected && typeof selected === 'string') {
+      // 获取文件所在目录
+      const path = selected.replace(/\\/g, '/')
+      const lastSlash = path.lastIndexOf('/')
+      if (lastSlash > 0) {
+        settings.value.game_path = path.substring(0, lastSlash)
+      }
+    }
+  } catch (e) {
+    console.error('选择文件失败:', e)
+  }
+}
+
+function clearPath() {
+  settings.value.game_path = ''
+}
 </script>
 
 <template>
@@ -41,35 +73,39 @@ async function save() {
       <h4>游戏路径</h4>
       <div class="field">
         <label>D2R.exe 所在目录</label>
-        <input
-          v-model="settings.game_path"
-          placeholder="如：C:\Program Files (x86)\Battle.net\Games\Diablo II Resurrected"
-        />
+        <div class="input-with-buttons">
+          <input
+            v-model="settings.game_path"
+            placeholder="如：C:\Program Files (x86)\Battle.net\Games\Diablo II Resurrected"
+          />
+          <button class="btn btn-secondary" @click="browsePath" type="button">📁 浏览</button>
+          <button class="btn btn-ghost" @click="clearPath" type="button">✕ 清空</button>
+        </div>
         <p class="hint">程序会在此目录下查找 D2R.exe 并启动</p>
-      </div>
-    </div>
-
-    <div class="section">
-      <h4>Handle64.exe 路径</h4>
-      <div class="field">
-        <label>Handle64.exe 完整路径（用于多开句柄处理）</label>
-        <input
-          v-model="settings.handle_path"
-          placeholder="如：C:\tools\Handle\handle64.exe"
-        />
-        <p class="hint">
-          从
-          <a href="https://download.sysinternals.com/files/Handle.zip" target="_blank">
-            Sysinternals Handle
-          </a>
-          下载，放到 Handle/ 目录后填写路径。留空则不处理互斥锁（可能无法多开）。
-        </p>
+        <p class="hint success">✅ Handle64.exe 已内置到启动器中，无需单独配置</p>
       </div>
     </div>
 
     <div class="section">
       <h4>批量启动设置</h4>
       <div class="field">
+        <label>
+          <input type="checkbox" v-model="settings.wait_for_login" />
+          等待登录完成后再启动下一个账号（推荐）
+        </label>
+        <p class="hint">
+          启用后，批量启动时会监控注册表 Token 变化，确认前一个账号到达角色选择界面后再启动下一个。
+          这样可以避免 Token 冲突导致的登录失败。
+        </p>
+      </div>
+      
+      <div class="field" v-if="settings.wait_for_login">
+        <label>登录检测超时时间（秒）</label>
+        <input v-model.number="settings.login_timeout_secs" type="number" min="30" max="180" />
+        <p class="hint">如果超过此时间还未检测到登录完成，将自动继续启动下一个账号</p>
+      </div>
+      
+      <div class="field" v-if="!settings.wait_for_login">
         <label>批量启动间隔（秒）</label>
         <input v-model.number="settings.launch_delay_secs" type="number" min="1" max="60" />
         <p class="hint">批量启动多个账号时，每个账号之间的等待时间</p>
@@ -113,8 +149,17 @@ h4 {
 label {
   font-size: 13px;
   color: #cbd5e1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
-input {
+input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+input[type="text"],
+input[type="number"] {
   background: #0f1220;
   border: 1px solid #2d3050;
   border-radius: 6px;
@@ -123,11 +168,30 @@ input {
   font-size: 14px;
   outline: none;
 }
-input:focus { border-color: #3b82f6; }
+input[type="text"]:focus,
+input[type="number"]:focus {
+  border-color: #3b82f6;
+}
 .hint {
   font-size: 12px;
   color: #64748b;
   margin: 0;
+}
+.hint.success {
+  color: #10b981;
+  font-weight: 500;
+}
+.input-with-buttons {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.input-with-buttons input {
+  flex: 1;
+}
+.input-with-buttons .btn {
+  padding: 8px 14px;
+  white-space: nowrap;
 }
 a { color: #60a5fa; }
 .btn {
@@ -141,4 +205,8 @@ a { color: #60a5fa; }
 .btn-primary { background: #3b82f6; color: #fff; }
 .btn-primary:hover { background: #2563eb; }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-secondary { background: #374151; color: #e2e8f0; }
+.btn-secondary:hover { background: #4b5563; }
+.btn-ghost { background: transparent; color: #94a3b8; border: 1px solid #374151; }
+.btn-ghost:hover { color: #e2e8f0; border-color: #6b7280; }
 </style>
