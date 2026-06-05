@@ -61,17 +61,69 @@ jobs:
           Expand-Archive upx.zip -DestinationPath .
           Move-Item "upx-$upxVersion-win64\upx.exe" upx.exe
 
-      - name: Compress with UPX
+      - name: Compress with UPX and re-sign
+        env:
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           $exePath = "src-tauri\target\release\d2r-launcher.exe"
+          $sigPath = "$exePath.sig"
           $originalSize = (Get-Item $exePath).Length
           Write-Host "Original size: $([math]::Round($originalSize/1MB, 2)) MB"
-          
+
           .\upx.exe --best --lzma $exePath
-          
+
           $compressedSize = (Get-Item $exePath).Length
           Write-Host "Compressed size: $([math]::Round($compressedSize/1MB, 2)) MB"
           Write-Host "Compression ratio: $([math]::Round(($originalSize - $compressedSize) / $originalSize * 100, 2))%"
+
+          # UPX modifies the binary, so the old .sig no longer matches.
+          # Generate a new Ed25519 signature for the compressed binary.
+          node -e "
+            const fs = require('fs');
+            const crypto = require('crypto');
+
+            const exePath = process.argv[1];
+            const sigPath = exePath + '.sig';
+            const keyB64 = process.env.TAURI_PRIVATE_KEY;
+            const password = process.env.TAURI_KEY_PASSWORD;
+
+            if (!keyB64 || !password) {
+              console.error('Missing TAURI_PRIVATE_KEY or TAURI_KEY_PASSWORD');
+              process.exit(1);
+            }
+
+            // Decode Tauri key format: base64(JSON({key: '<base64-seed>'}))
+            const keyData = JSON.parse(Buffer.from(keyB64, 'base64').toString());
+            const rawKey = Buffer.from(keyData.key, 'base64');
+
+            // Tauri uses Ed25519, key is 64 bytes (seed + public)
+            const seed = rawKey.slice(0, 32);
+
+            // Build PKCS#8 DER for Ed25519 seed
+            const pkcs8Key = Buffer.concat([
+              Buffer.from([0x30, 0x2e]),
+              Buffer.from([0x02, 0x01, 0x00]),
+              Buffer.from([0x30, 0x05]),
+              Buffer.from([0x06, 0x03, 0x2b, 0x65, 0x70]),
+              Buffer.from([0x04, 0x22]),
+              Buffer.from([0x04, 0x20]),
+              seed
+            ]);
+
+            const privateKey = crypto.createPrivateKey({
+              format: 'der',
+              type: 'pkcs8',
+              key: pkcs8Key
+            });
+
+            const binary = fs.readFileSync(exePath);
+            const signature = crypto.sign(null, binary, privateKey);
+            fs.writeFileSync(sigPath, signature.toString('base64'));
+            console.log('Ed25519 signature for compressed binary generated');
+          " $exePath
+
+          Write-Host "New signature: $(Get-Content $sigPath -Raw)"
 
       - name: Generate changelog
         id: changelog
@@ -126,9 +178,13 @@ jobs:
           # 读取签名文件
           if (Test-Path $sigPath) {
             $signature = Get-Content $sigPath -Raw
+            if ([string]::IsNullOrWhiteSpace($signature)) {
+              Write-Error "Signature file exists but is empty!"
+              exit 1
+            }
           } else {
-            Write-Warning "Signature file not found at $sigPath"
-            $signature = ""
+            Write-Error "Signature file not found at $sigPath - updater will not work without it!"
+            exit 1
           }
           
           # 读取 changelog
