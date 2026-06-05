@@ -236,23 +236,72 @@ pub fn launch_all_accounts(
 
 /// 使用 Handle64.exe 杀掉 D2R 进程的互斥锁句柄，允许多开
 fn kill_d2r_mutex_handle(handle_exe: &str, pid: u32) {
-    // Handle64.exe -p <pid> -a <handle_name> -c
-    // D2R 的互斥锁名称
     let mutex_name = "DiabloII Check For Other Instances";
 
-    let output = Command::new(handle_exe)
+    // 第一步：查询互斥锁的 handle ID（不需要管理员权限）
+    let query_output = Command::new(handle_exe)
         .args([
             "-accepteula",
+            "-nobanner",
+            "-a",
             "-p",
             &pid.to_string(),
             mutex_name,
-            "-c",   // close handle
-            "-y",   // 跳过确认
         ])
         .output();
 
-    if let Err(e) = output {
-        eprintln!("Handle64 error: {}", e);
+    let query_output = match query_output {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("Handle64 查询失败: {}", e);
+            return;
+        }
+    };
+
+    let stdout = String::from_utf8_lossy(&query_output.stdout);
+    // 输出格式示例（-a 模式）:
+    // D2R.exe  pid: 18016  type: Event  75C: \Sessions\1\BaseNamedObjects\DiabloII Check For Other Instances
+    // handle ID 在最后一个冒号前面
+    let handle_id = stdout
+        .lines()
+        .find(|line| line.contains("DiabloII Check For Other Instances"))
+        .and_then(|line| line.rsplitn(2, ':').last())
+        .and_then(|before| before.split_whitespace().next_back());
+
+    let handle_id = match handle_id {
+        Some(id) if !id.is_empty() => id,
+        _ => {
+            eprintln!("⚠️  未找到互斥锁句柄");
+            return;
+        }
+    };
+
+    println!("🔑 找到互斥锁 handle ID: 0x{}", handle_id);
+
+    // 第二步：关闭该 handle（需要管理员权限，使用 runas 提权）
+    // 每个 -ArgumentList 元素是独立参数，避免空格转义问题
+    let ps_cmd = format!(
+        "Start-Process -FilePath '{}' \
+         -ArgumentList '-accepteula','-nobanner','-p','{}','-c','{}','-y' \
+         -Verb RunAs -WindowStyle Hidden -Wait",
+        handle_exe, pid, handle_id
+    );
+
+    let close_output = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &ps_cmd])
+        .output();
+
+    match close_output {
+        Ok(o) if !o.status.success() => {
+            let stderr = String::from_utf8_lossy(&o.stderr);
+            eprintln!("Handle64 关闭失败: {}", stderr);
+        }
+        Ok(_) => {
+            println!("✅ 互斥锁句柄已关闭");
+        }
+        Err(e) => {
+            eprintln!("Handle64 关闭失败: {}", e);
+        }
     }
 }
 
