@@ -79,50 +79,18 @@ jobs:
 
           # UPX modifies the binary, so the old .sig no longer matches.
           # Generate a new Ed25519 signature for the compressed binary.
-          node -e "
-            const fs = require('fs');
-            const crypto = require('crypto');
+          # Write key to temp file (avoids shell escaping issues with multi-line keys)
+          $tmpKey = [System.IO.Path]::GetTempFileName()
+          $env:TAURI_PRIVATE_KEY | Out-File -FilePath $tmpKey -Encoding utf8 -NoNewline
 
-            const exePath = process.argv[1];
-            const sigPath = exePath + '.sig';
-            const keyB64 = process.env.TAURI_PRIVATE_KEY;
-            const password = process.env.TAURI_KEY_PASSWORD;
+          python scripts/sign-upx.py $exePath $tmpKey $env:TAURI_KEY_PASSWORD
 
-            if (!keyB64 || !password) {
-              console.error('Missing TAURI_PRIVATE_KEY or TAURI_KEY_PASSWORD');
-              process.exit(1);
-            }
+          Remove-Item $tmpKey -Force
 
-            // Decode Tauri key format: base64(JSON({key: '<base64-seed>'}))
-            const keyData = JSON.parse(Buffer.from(keyB64, 'base64').toString());
-            const rawKey = Buffer.from(keyData.key, 'base64');
-
-            // Tauri uses Ed25519, key is 64 bytes (seed + public)
-            const seed = rawKey.slice(0, 32);
-
-            // Build PKCS#8 DER for Ed25519 seed
-            const pkcs8Key = Buffer.concat([
-              Buffer.from([0x30, 0x2e]),
-              Buffer.from([0x02, 0x01, 0x00]),
-              Buffer.from([0x30, 0x05]),
-              Buffer.from([0x06, 0x03, 0x2b, 0x65, 0x70]),
-              Buffer.from([0x04, 0x22]),
-              Buffer.from([0x04, 0x20]),
-              seed
-            ]);
-
-            const privateKey = crypto.createPrivateKey({
-              format: 'der',
-              type: 'pkcs8',
-              key: pkcs8Key
-            });
-
-            const binary = fs.readFileSync(exePath);
-            const signature = crypto.sign(null, binary, privateKey);
-            fs.writeFileSync(sigPath, signature.toString('base64'));
-            console.log('Ed25519 signature for compressed binary generated');
-          " $exePath
-
+          if (!(Test-Path $sigPath)) {
+            Write-Error "Signature file was not created!"
+            exit 1
+          }
           Write-Host "New signature: $(Get-Content $sigPath -Raw)"
 
       - name: Generate changelog
