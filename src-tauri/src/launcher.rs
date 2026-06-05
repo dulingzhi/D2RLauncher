@@ -394,16 +394,16 @@ unsafe extern "system" fn find_window_callback(
 /// Windows 下设置窗口位置和大小
 #[cfg(windows)]
 fn set_window_position_and_size(
-    target_pid: u32, 
-    x: Option<i32>, 
-    y: Option<i32>, 
-    width: Option<i32>, 
+    target_pid: u32,
+    x: Option<i32>,
+    y: Option<i32>,
+    width: Option<i32>,
     height: Option<i32>
 ) -> Result<(), String> {
     use std::sync::{Arc, Mutex};
     use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
     use windows::Win32::Foundation::RECT;
-    
+
     let target_hwnd: Arc<Mutex<Option<HWND>>> = Arc::new(Mutex::new(None));
     let target_hwnd_clone = Arc::clone(&target_hwnd);
 
@@ -424,20 +424,20 @@ fn set_window_position_and_size(
         let guard = target_hwnd.lock().unwrap();
         *guard
     };
-    
+
     if let Some(hwnd) = found_hwnd {
         unsafe {
             // 获取当前窗口位置和大小
             let mut rect = RECT::default();
             GetWindowRect(hwnd, &mut rect).map_err(|e| format!("GetWindowRect 失败: {:?}", e))?;
-            
+
             let current_width = rect.right - rect.left;
             let current_height = rect.bottom - rect.top;
-            
+
             // 使用配置的值或保持当前值
             let final_width = width.unwrap_or(current_width);
             let final_height = height.unwrap_or(current_height);
-            
+
             // 计算位置
             let (final_x, final_y) = if x.is_none() || y.is_none() {
                 // 居中显示
@@ -445,7 +445,7 @@ fn set_window_position_and_size(
                 let screen_height = GetSystemMetrics(SM_CYSCREEN);
                 let centered_x = (screen_width - final_width) / 2;
                 let centered_y = (screen_height - final_height) / 2;
-                
+
                 (
                     x.unwrap_or(centered_x),
                     y.unwrap_or(centered_y)
@@ -453,9 +453,9 @@ fn set_window_position_and_size(
             } else {
                 (x.unwrap(), y.unwrap())
             };
-            
+
             println!("📐 设置窗口: x={}, y={}, width={}, height={}", final_x, final_y, final_width, final_height);
-            
+
             SetWindowPos(
                 hwnd,
                 HWND_TOP,
@@ -466,10 +466,11 @@ fn set_window_position_and_size(
                 SWP_NOZORDER
             ).map_err(|e| format!("SetWindowPos 失败: {:?}", e))?;
         }
-        
+
         println!("✅ 窗口位置和大小设置成功");
         Ok(())
     } else {
         Err(format!("未找到进程 {} 的游戏窗口", target_pid))
     }
 }
+

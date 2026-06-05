@@ -198,7 +198,6 @@ async function handleSave(data: Omit<Account, 'id' | 'encrypted_token' | 'token_
   } else {
     await invoke('add_account', {
       label: data.label,
-      email: data.email,
       customArgs: data.custom_args,
       windowX: data.window_x,
       windowY: data.window_y,
@@ -417,7 +416,7 @@ const readyCount = () => accounts.value.filter((a) => a.encrypted_token).length
 
     <!-- 设置页 -->
     <main v-else-if="tab === 'settings'" class="main-content">
-      <SettingsPanel />
+      <SettingsPanel @accounts-updated="loadAccounts" />
     </main>
 
     <!-- 添加/编辑弹窗 -->

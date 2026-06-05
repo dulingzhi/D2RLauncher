@@ -112,7 +112,6 @@ async function killProcess() {
           {{ account.label }}
           <span v-if="isRunning" class="running-badge">🎮 运行中</span>
         </span>
-        <span class="account-email">{{ account.email }}</span>
       </div>
       <div class="account-token-info">
         <span :class="hasToken ? 'token-ok' : 'token-missing'">
@@ -226,10 +225,6 @@ async function killProcess() {
   background: rgba(74, 222, 128, 0.2);
   color: #4ade80;
   font-weight: 500;
-}
-.account-email {
-  font-size: 12px;
-  color: #94a3b8;
 }
 .account-token-info {
   display: flex;

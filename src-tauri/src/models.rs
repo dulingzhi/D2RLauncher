@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 pub struct Account {
     pub id: String,
     pub label: String,
-    pub email: String,
     /// base64 编码的 DPAPI 加密 token
     pub encrypted_token: Option<String>,
     /// token 获取时间 (Unix timestamp seconds)

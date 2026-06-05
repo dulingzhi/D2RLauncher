@@ -12,7 +12,6 @@ const emit = defineEmits<{
 }>()
 
 const label = ref('')
-const email = ref('')
 const customArgs = ref('')
 const windowX = ref<number | null>(null)
 const windowY = ref<number | null>(null)
@@ -24,7 +23,6 @@ watch(
   (v) => {
     if (v && props.initial) {
       label.value = props.initial.label
-      email.value = props.initial.email
       customArgs.value = props.initial.custom_args
       windowX.value = props.initial.window_x
       windowY.value = props.initial.window_y
@@ -32,7 +30,6 @@ watch(
       windowHeight.value = props.initial.window_height
     } else if (v) {
       label.value = ''
-      email.value = ''
       customArgs.value = ''
       windowX.value = null
       windowY.value = null
@@ -43,7 +40,7 @@ watch(
 )
 
 function submit() {
-  if (!label.value.trim() || !email.value.trim()) return
+  if (!label.value.trim()) return
   
   // 辅助函数：将空字符串/NaN转换为null，避免Rust后端类型错误
   const toNullableNumber = (val: any): number | null => {
@@ -55,7 +52,6 @@ function submit() {
   
   emit('save', {
     label: label.value.trim(),
-    email: email.value.trim(),
     custom_args: customArgs.value.trim(),
     window_x: toNullableNumber(windowX.value),
     window_y: toNullableNumber(windowY.value),
@@ -77,10 +73,6 @@ function submit() {
           <div class="field">
             <label>显示名称 *</label>
             <input v-model="label" placeholder="如：小号1" required />
-          </div>
-          <div class="field">
-            <label>Battle.net CN 邮箱 *</label>
-            <input v-model="email" type="email" placeholder="如：123456@qq.com" required />
           </div>
           <div class="field">
             <label>自定义启动参数</label>

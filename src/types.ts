@@ -2,7 +2,6 @@
 export interface Account {
   id: string
   label: string
-  email: string
   encrypted_token: string | null
   token_set_at: number | null  // Unix timestamp (seconds)
   custom_args: string
