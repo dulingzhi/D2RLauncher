@@ -63,8 +63,8 @@ jobs:
 
       - name: Compress with UPX and re-sign
         env:
-          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           $exePath = "src-tauri\target\release\d2r-launcher.exe"
           $sigPath = "$exePath.sig"
@@ -78,14 +78,8 @@ jobs:
           Write-Host "Compression ratio: $([math]::Round(($originalSize - $compressedSize) / $originalSize * 100, 2))%"
 
           # UPX modifies the binary, so the old .sig no longer matches.
-          # Generate a new Ed25519 signature for the compressed binary.
-          # Write key to temp file (avoids shell escaping issues with multi-line keys)
-          $tmpKey = [System.IO.Path]::GetTempFileName()
-          $env:TAURI_PRIVATE_KEY | Out-File -FilePath $tmpKey -Encoding utf8 -NoNewline
-
-          python scripts/sign-upx.py $exePath $tmpKey $env:TAURI_KEY_PASSWORD
-
-          Remove-Item $tmpKey -Force
+          # Re-sign using Tauri CLI (produces minisign-compatible signature).
+          bunx @tauri-apps/cli signer sign $exePath
 
           if (!(Test-Path $sigPath)) {
             Write-Error "Signature file was not created!"

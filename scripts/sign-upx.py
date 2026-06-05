@@ -35,7 +35,6 @@ def parse_rsign_key(b64_data: bytes, password: str) -> bytes:
     [16 bytes: BLAKE2b-160 MAC]
     """
     import nacl.bindings
-    from nacl.pwhash import scrypt
     from nacl.secret import SecretBox
 
     payload = base64.b64decode(b64_data)
@@ -47,11 +46,13 @@ def parse_rsign_key(b64_data: bytes, password: str) -> bytes:
 
     # Derive key using scrypt (N=32768, r=8, p=1, dkLen=64)
     # Matches libsodium crypto_pwhash_SCRYPTSALSA208SHA256 with INTERACTIVE limits
-    derived = scrypt.kdf(64, password.encode('utf-8'), salt,
-                         opslimit=32768, memlimit=8, datalimit=1)
+    # Use low-level binding to support 16-byte salt (rsign format uses 16, not 32)
+    derived = nacl.bindings.crypto_pwhash_scryptsalsa208sha256_ll(
+        password.encode('utf-8'), salt, n=32768, r=8, p=1, dklen=64,
+        maxmem=1024 * 1024 * 1024)  # 1GB maxmem to avoid "memory limit exceeded"
 
     # Verify MAC using generichash (BLAKE2b) with derived key
-    computed_mac = nacl.bindings.crypto_generichash(
+    computed_mac = nacl.bindings.crypto_generichash.generichash_blake2b_salt_personal(
         enc_data, key=derived[:32], digest_size=16)
     if not nacl.bindings.sodium_memcmp(computed_mac, mac):
         print("ERROR: Wrong password or corrupted key (MAC verification failed)",
@@ -133,16 +134,21 @@ def main():
     # rsign encrypted format
     print("Detected rsign encrypted key format")
 
-    # Find the base64: line
+    # Find the base64-encoded key data.
+    # Tauri v2 format: line after "untrusted comment:" is raw base64 data (no prefix)
+    # rsign format: line starts with "base64:" prefix
     lines = key_content.split('\n')
     b64_line = None
     for line in lines:
         if line.startswith('base64:'):
             b64_line = line[7:]  # Strip "base64:" prefix
             break
+        # Handle Tauri v2 signer output: raw base64 on the line after comments
+        if b64_line is None and line and not line.startswith('untrusted'):
+            b64_line = line.strip()
 
     if not b64_line:
-        print("ERROR: Cannot find base64: line in rsign key", file=sys.stderr)
+        print("ERROR: Cannot find base64 key data in rsign key", file=sys.stderr)
         sys.exit(1)
 
     ensure_pynacl()
