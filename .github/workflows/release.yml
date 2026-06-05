@@ -44,6 +44,24 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Inject version from tag
+        run: |
+          # 提取版本号，去掉 v 前缀（v1.2.3 → 1.2.3）
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          Write-Host "Setting version to: $version"
+
+          # 更新 tauri.conf.json 中的 version 字段
+          $conf = Get-Content src-tauri/tauri.conf.json -Raw
+          $conf = $conf -replace '"version"\s*:\s*"[^"]*"', "`"version`": `"$version`""
+          $conf | Out-File -FilePath src-tauri/tauri.conf.json -Encoding utf8 -NoNewline
+          Write-Host "Updated tauri.conf.json version"
+
+          # 更新 Cargo.toml 中的 version 字段
+          $cargo = Get-Content src-tauri/Cargo.toml -Raw
+          $cargo = $cargo -replace '^version\s*=\s*"[^"]*"', "version = `"$version`""
+          $cargo | Out-File -FilePath src-tauri/Cargo.toml -Encoding utf8 -NoNewline
+          Write-Host "Updated Cargo.toml version"
+
       - name: Install frontend dependencies
         run: bun install
 

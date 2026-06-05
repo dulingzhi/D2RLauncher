@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { check } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
+import { getVersion } from '@tauri-apps/api/app'
 import AccountCard from './components/AccountCard.vue'
 import AccountModal from './components/AccountModal.vue'
 import SettingsModal from './components/SettingsModal.vue'
@@ -12,7 +13,7 @@ import ConfirmDialog from './components/ConfirmDialog.vue'
 import { useToast } from './composables/useToast'
 import type { Account } from './types'
 
-const { success, error: toastError, warning, info } = useToast()
+const { success, error: toastError, warning, info, update: updateToast, remove: removeToast } = useToast()
 
 interface GameInstance {
   account_id: string
@@ -54,15 +55,16 @@ onMounted(async () => {
   // 检查更新（仅生产环境）
   if (import.meta.env.PROD) {
     try {
+      const currentVersion = await getVersion()
       const update = await check()
-      if (update) {
+      if (update && update.version !== currentVersion) {
         const ok = await confirmRef.value?.confirm({
           title: '发现新版本',
-          message: `版本 ${update.version}\n\n更新内容：\n${update.body}\n\n是否立即下载并安装？`,
+          message: `当前版本 ${currentVersion}，新版本 ${update.version}\n\n更新内容：\n${update.body}\n\n是否立即下载并安装？`,
           confirmText: '下载更新',
         })
         if (ok) {
-          info('正在下载更新...')
+          const progressToast = info('正在下载更新...', 0)
           let downloaded = 0
           let contentLength = 0
 
@@ -74,14 +76,15 @@ onMounted(async () => {
               case 'Progress':
                 downloaded += event.data.chunkLength
                 const percent = contentLength > 0 ? ((downloaded / contentLength) * 100).toFixed(0) : '0'
-                info(`下载进度: ${percent}%`)
+                updateToast(progressToast.id, `下载进度: ${percent}%`)
                 break
               case 'Finished':
-                info('下载完成，准备安装...')
+                updateToast(progressToast.id, '下载完成，准备安装...')
                 break
             }
           })
 
+          removeToast(progressToast.id)
           success('更新安装完成，正在重启...')
           await relaunch()
         }

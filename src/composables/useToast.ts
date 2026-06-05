@@ -48,8 +48,18 @@ export function useToast() {
     toasts.value = []
   }
 
+  function update(id: number, message: string, duration?: number) {
+    const toast = toasts.value.find((t) => t.id === id)
+    if (toast) {
+      toast.message = message
+      if (duration !== undefined) {
+        toast.duration = duration
+      }
+    }
+  }
+
   function info(message: string, duration?: number) {
-    add('info', message, duration)
+    return add('info', message, duration)
   }
   function success(message: string, duration?: number) {
     add('success', message, duration)
@@ -61,5 +71,5 @@ export function useToast() {
     add('error', message, duration)
   }
 
-  return { toasts, add, remove, clear, info, success, warning, error }
+  return { toasts, add, update, remove, clear, info, success, warning, error }
 }
