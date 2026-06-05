@@ -6,10 +6,13 @@ import { check } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
 import AccountCard from './components/AccountCard.vue'
 import AccountModal from './components/AccountModal.vue'
-import SettingsPanel from './components/SettingsPanel.vue'
+import SettingsModal from './components/SettingsModal.vue'
+import ToastContainer from './components/ToastContainer.vue'
+import ConfirmDialog from './components/ConfirmDialog.vue'
+import { useToast } from './composables/useToast'
 import type { Account } from './types'
 
-type Tab = 'accounts' | 'settings'
+const { success, error: toastError, warning, info } = useToast()
 
 interface GameInstance {
   account_id: string
@@ -26,16 +29,17 @@ interface GameStatus {
   total_running: number
 }
 
-const tab = ref<Tab>('accounts')
 const accounts = ref<Account[]>([])
 const showModal = ref(false)
+const showSettings = ref(false)
 const editingAccount = ref<Account | null>(null)
 const batchLaunching = ref(false)
-const batchMsg = ref('')
 const runningGames = ref<Map<string, GameInstance>>(new Map())
-const launchQueue = ref<string[]>([])  // 启动队列
-const currentLaunching = ref<string | null>(null)  // 当前正在启动的账号ID
-const waitingForLogin = ref<{ accountId: string; accountName: string } | null>(null)  // 正在等待登录的账号
+const launchQueue = ref<string[]>([])
+const currentLaunching = ref<string | null>(null)
+const waitingForLogin = ref<{ accountId: string; accountName: string } | null>(null)
+
+const confirmRef = ref<InstanceType<typeof ConfirmDialog> | null>(null)
 
 let unlistenGameStatus: UnlistenFn | null = null
 let unlistenLoginComplete: UnlistenFn | null = null
@@ -47,89 +51,73 @@ async function loadAccounts() {
 const runningCount = computed(() => runningGames.value.size)
 
 onMounted(async () => {
-  // 检查更新（仅在生产环境）
+  // 检查更新（仅生产环境）
   if (import.meta.env.PROD) {
     try {
-      console.log('🔍 正在检查更新...')
       const update = await check()
       if (update) {
-        console.log(`🆕 发现新版本 ${update.version}，当前版本需要更新`)
-        const confirmed = confirm(
-          `发现新版本 ${update.version}！\n\n更新内容：\n${update.body}\n\n是否立即下载并安装？`
-        )
-        
-        if (confirmed) {
-          console.log('⏬ 开始下载更新...')
+        const ok = await confirmRef.value?.confirm({
+          title: '发现新版本',
+          message: `版本 ${update.version}\n\n更新内容：\n${update.body}\n\n是否立即下载并安装？`,
+          confirmText: '下载更新',
+        })
+        if (ok) {
+          info('正在下载更新...')
           let downloaded = 0
           let contentLength = 0
-          
+
           await update.downloadAndInstall((event) => {
             switch (event.event) {
               case 'Started':
                 contentLength = event.data.contentLength || 0
-                console.log(`📦 开始下载，文件大小: ${(contentLength / 1024 / 1024).toFixed(2)} MB`)
                 break
               case 'Progress':
                 downloaded += event.data.chunkLength
                 const percent = contentLength > 0 ? ((downloaded / contentLength) * 100).toFixed(0) : '0'
-                console.log(`⏬ 下载进度: ${percent}%`)
+                info(`下载进度: ${percent}%`)
                 break
               case 'Finished':
-                console.log('✅ 下载完成，准备安装...')
+                info('下载完成，准备安装...')
                 break
             }
           })
-          
-          console.log('🔄 更新安装完成，正在重启应用...')
+
+          success('更新安装完成，正在重启...')
           await relaunch()
         }
-      } else {
-        console.log('✅ 当前已是最新版本')
       }
-    } catch (error) {
-      // 静默处理更新检查失败（可能是网络问题或尚未发布版本）
-      console.log('ℹ️ 无法检查更新（可能是网络问题或首次发布）')
+    } catch {
+      // 静默处理更新检查失败
     }
-  } else {
-    console.log('ℹ️ 开发模式下跳过更新检查')
   }
-  
+
   await loadAccounts()
-  
-  // 监听游戏状态更新
+
   unlistenGameStatus = await listen<GameStatus>('game_status_update', (event) => {
     const newMap = new Map<string, GameInstance>()
-    event.payload.running_instances.forEach(instance => {
+    event.payload.running_instances.forEach((instance) => {
       newMap.set(instance.account_id, instance)
     })
     runningGames.value = newMap
-    
-    // 检测：如果正在等待登录的账号游戏进程消失了，清除遮罩层
+
+    // 等待登录的账号游戏进程消失 → 清除遮罩
     if (currentLaunching.value && waitingForLogin.value) {
       const isGameRunning = newMap.has(currentLaunching.value)
-      
-      // 基于 PID 监控，游戏进程立即可见，无需宽容期
+
       if (!isGameRunning) {
-        console.log(`⚠️ 检测到正在等待登录的游戏 ${waitingForLogin.value.accountName} 已关闭，清除遮罩层`)
-        
         waitingForLogin.value = null
         currentLaunching.value = null
-        
-        // 如果在批量启动中，继续启动下一个
+
         if (batchLaunching.value && launchQueue.value.length > 0) {
-          console.log('继续启动队列中的下一个账号...')
           setTimeout(() => processLaunchQueue(), 1000)
         } else if (batchLaunching.value) {
-          // 队列为空，结束批量启动
           batchLaunching.value = false
-          batchMsg.value = '⚠️ 启动中断（游戏被关闭）'
-          setTimeout(() => (batchMsg.value = ''), 3000)
+          warning('⚠️ 启动中断（游戏被关闭）')
         }
       }
     }
   })
-  
-  // 监听登录完成事件（用于队列启动）
+
   unlistenLoginComplete = await listen<{
     account_id: string
     account_name: string
@@ -137,46 +125,35 @@ onMounted(async () => {
     timeout?: boolean
     error?: string
   }>('login_complete', (event) => {
-    console.log('📥 收到登录完成事件:', event.payload)
-    
     if (event.payload.account_id === currentLaunching.value) {
       if (event.payload.success) {
-        console.log(`✅ ${event.payload.account_name} 登录完成`)
+        // 正常流程
       } else if (event.payload.timeout) {
-        console.log(`⏰ ${event.payload.account_name} 登录检测超时，继续启动下一个`)
+        // 超时，继续下一个
       } else {
-        console.log(`⚠️ ${event.payload.account_name} 登录检测失败: ${event.payload.error}`)
+        // 失败
       }
-      
-      // 清除等待登录状态
+
       waitingForLogin.value = null
-      
-      // 启动队列中的下一个账号
       currentLaunching.value = null
       processLaunchQueue()
     }
   })
-  
-  // 启动游戏监控
+
   try {
     await invoke('start_game_monitoring')
-    console.log('🎮 游戏监控已启动')
-  } catch (error) {
-    console.error('启动游戏监控失败:', error)
+  } catch (e) {
+    console.error('启动游戏监控失败:', e)
   }
 })
 
 onUnmounted(async () => {
-  if (unlistenGameStatus) {
-    unlistenGameStatus()
-  }
-  if (unlistenLoginComplete) {
-    unlistenLoginComplete()
-  }
+  unlistenGameStatus?.()
+  unlistenLoginComplete?.()
   try {
     await invoke('stop_game_monitoring')
-  } catch (error) {
-    console.error('停止游戏监控失败:', error)
+  } catch {
+    // ignore
   }
 })
 
@@ -191,163 +168,158 @@ function openEditModal(account: Account) {
 }
 
 async function handleSave(data: Omit<Account, 'id' | 'encrypted_token' | 'token_set_at'>) {
-  if (editingAccount.value) {
-    await invoke('update_account', {
-      account: { ...editingAccount.value, ...data },
-    })
-  } else {
-    await invoke('add_account', {
-      label: data.label,
-      customArgs: data.custom_args,
-      windowX: data.window_x,
-      windowY: data.window_y,
-      windowWidth: data.window_width,
-      windowHeight: data.window_height,
-    })
+  try {
+    if (editingAccount.value) {
+      await invoke('update_account', { account: { ...editingAccount.value, ...data } })
+      success('账号已更新')
+    } else {
+      await invoke('add_account', {
+        label: data.label,
+        customArgs: data.custom_args,
+        windowX: data.window_x,
+        windowY: data.window_y,
+        windowWidth: data.window_width,
+        windowHeight: data.window_height,
+      })
+      success('账号已添加')
+    }
+    showModal.value = false
+    await loadAccounts()
+  } catch (e) {
+    toastError(`保存失败: ${e}`)
   }
-  showModal.value = false
-  await loadAccounts()
 }
 
 async function handleDelete(id: string) {
-  if (!confirm('确认删除该账号？')) return
-  await invoke('delete_account', { id })
-  await loadAccounts()
+  const ok = await confirmRef.value?.confirm({
+    title: '删除账号',
+    message: '确认删除该账号？此操作不可撤销。',
+    confirmText: '删除',
+    danger: true,
+  })
+  if (!ok) return
+  try {
+    await invoke('delete_account', { id })
+    success('账号已删除')
+    await loadAccounts()
+  } catch (e) {
+    toastError(`删除失败: ${e}`)
+  }
 }
 
-// 处理单个账号启动（从 AccountCard 发来的事件）
+async function handleKillProcess(processId: number, accountName: string) {
+  const ok = await confirmRef.value?.confirm({
+    title: '关闭进程',
+    message: `确定要关闭「${accountName}」的游戏进程吗？\nPID: ${processId}`,
+    confirmText: '关闭',
+    danger: true,
+  })
+  if (!ok) return
+  try {
+    await invoke('kill_game_process', { processId })
+    success(`已关闭「${accountName}」进程`)
+    await loadAccounts()
+  } catch (e) {
+    toastError(`关闭失败: ${e}`)
+  }
+}
+
 async function handleLaunchAccount(account: Account) {
   try {
     const settings: any = await invoke('get_settings')
-    
-    // 检查游戏路径是否已设置
+
     if (!settings.game_path || settings.game_path.trim() === '') {
-      alert('⚠️ 请先设置 D2R.exe 所在目录！')
-      tab.value = 'settings'
+      warning('请先设置 D2R.exe 所在目录')
+      showSettings.value = true
       return
     }
-    
-    // 显示遮罩层（如果启用了登录检测）
+
     if (settings.wait_for_login) {
       currentLaunching.value = account.id
-      waitingForLogin.value = {
-        accountId: account.id,
-        accountName: account.label
-      }
+      waitingForLogin.value = { accountId: account.id, accountName: account.label }
     }
-    
-    await invoke('launch_account', {
-      accountId: account.id,
-      gamePath: settings.game_path,
-    })
-    
-    // 如果禁用了登录检测，立即清除状态
+
+    await invoke('launch_account', { accountId: account.id, gamePath: settings.game_path })
+
     if (!settings.wait_for_login) {
       currentLaunching.value = null
       waitingForLogin.value = null
     }
-    // 如果启用了登录检测，等待 login_complete 事件来清除状态
   } catch (e) {
-    console.error('启动失败:', e)
-    alert(`启动失败: ${e}`)
+    toastError(`启动失败: ${e}`)
     currentLaunching.value = null
     waitingForLogin.value = null
   }
 }
 
-// 处理启动队列
 async function processLaunchQueue() {
   if (launchQueue.value.length === 0) {
     batchLaunching.value = false
-    batchMsg.value = '✅ 全部启动完成'
-    waitingForLogin.value = null  // 清除等待状态
-    setTimeout(() => (batchMsg.value = ''), 3000)
+    success('✅ 全部启动完成')
+    waitingForLogin.value = null
     return
   }
-  
-  // 取出队列中的第一个账号
+
   const accountId = launchQueue.value.shift()!
   currentLaunching.value = accountId
-  
-  const account = accounts.value.find(a => a.id === accountId)
+
+  const account = accounts.value.find((a) => a.id === accountId)
   if (!account) {
-    console.error('账号未找到:', accountId)
-    processLaunchQueue()  // 继续下一个
+    processLaunchQueue()
     return
   }
-  
-  const remaining = launchQueue.value.length
-  batchMsg.value = `正在启动: ${account.label}... (剩余 ${remaining} 个)`
-  
+
+  info(`正在启动: ${account.label}... (剩余 ${launchQueue.value.length} 个)`)
+
   try {
     const settings: any = await invoke('get_settings')
-    await invoke('launch_account', {
-      accountId: accountId,
-      gamePath: settings.game_path,
-    })
-    
-    // 如果启用了登录检测，显示等待遮罩
+    await invoke('launch_account', { accountId, gamePath: settings.game_path })
+
     if (settings.wait_for_login) {
-      waitingForLogin.value = {
-        accountId: accountId,
-        accountName: account.label
-      }
+      waitingForLogin.value = { accountId, accountName: account.label }
     }
-    
-    // 如果禁用了登录检测，延迟后启动下一个
+
     if (!settings.wait_for_login) {
-      console.log(`⚠️ 已禁用登录检测，${settings.launch_delay_secs}秒后启动下一个`)
-      await new Promise(resolve => setTimeout(resolve, settings.launch_delay_secs * 1000))
+      await new Promise((resolve) => setTimeout(resolve, settings.launch_delay_secs * 1000))
       currentLaunching.value = null
       processLaunchQueue()
     }
-    // 如果启用了登录检测，等待 login_complete 事件触发 processLaunchQueue
   } catch (e) {
-    console.error('启动失败:', e)
-    batchMsg.value = `❌ ${account.label} 启动失败: ${e}`
+    toastError(`❌ ${account.label} 启动失败: ${e}`)
     currentLaunching.value = null
-    waitingForLogin.value = null  // 清除等待状态
-    // 继续启动下一个
+    waitingForLogin.value = null
     setTimeout(() => processLaunchQueue(), 2000)
   }
 }
 
 async function launchAll() {
-  const ids = accounts.value
-    .filter((a) => a.encrypted_token)
-    .map((a) => a.id)
+  const ids = accounts.value.filter((a) => a.encrypted_token).map((a) => a.id)
 
   if (!ids.length) {
-    batchMsg.value = '没有已配置 Token 的账号'
-    setTimeout(() => (batchMsg.value = ''), 3000)
-    return
-  }
-
-  // 检查游戏路径是否已设置
-  try {
-    const settings: any = await invoke('get_settings')
-    if (!settings.game_path || settings.game_path.trim() === '') {
-      alert('⚠️ 请先设置 D2R.exe 所在目录！')
-      tab.value = 'settings'
-      return
-    }
-  } catch (e) {
-    console.error('获取设置失败:', e)
-    alert('获取设置失败，请稍后重试')
+    warning('没有已配置 Token 的账号')
     return
   }
 
   if (batchLaunching.value) {
-    batchMsg.value = '已经在批量启动中...'
+    info('已经在批量启动中...')
     return
   }
 
-  // 初始化队列
+  try {
+    const settings: any = await invoke('get_settings')
+    if (!settings.game_path || settings.game_path.trim() === '') {
+      warning('请先设置 D2R.exe 所在目录')
+      showSettings.value = true
+      return
+    }
+  } catch {
+    toastError('获取设置失败')
+    return
+  }
+
   launchQueue.value = [...ids]
   batchLaunching.value = true
-  batchMsg.value = `准备启动 ${ids.length} 个账号...`
-  
-  // 开始处理队列
+  info(`准备启动 ${ids.length} 个账号...`)
   processLaunchQueue()
 }
 
@@ -356,36 +328,40 @@ const readyCount = () => accounts.value.filter((a) => a.encrypted_token).length
 
 <template>
   <div class="app">
-    <!-- 标题栏 -->
+    <!-- 顶栏 -->
     <header class="topbar">
-      <div class="topbar-title">
-        <img src="/tauri.svg" class="topbar-icon" alt="" />
-        <span>D2R CN 多开启动器</span>
+      <div class="topbar-left">
+        <div class="app-title">
+          <span class="title-text">D2R CN 多开启动器</span>
+        </div>
       </div>
-      <nav class="tabs">
-        <button
-          class="tab-btn"
-          :class="{ active: tab === 'accounts' }"
-          @click="tab = 'accounts'"
-        >账号管理</button>
-        <button
-          class="tab-btn"
-          :class="{ active: tab === 'settings' }"
-          @click="tab = 'settings'"
-        >⚙️ 设置</button>
-      </nav>
+
+      <div class="topbar-center">
+        <span class="status-badge" v-if="runningCount > 0">
+          🎮 {{ runningCount }} 运行中
+        </span>
+        <span class="status-badge status-ready" v-else-if="readyCount() > 0">
+          {{ readyCount() }} 就绪
+        </span>
+      </div>
+
+      <div class="topbar-right">
+        <button class="btn-icon" @click="showSettings = true" title="设置">⚙️</button>
+      </div>
     </header>
 
-    <!-- 账号列表页 -->
-    <main v-if="tab === 'accounts'" class="main-content">
-      <div class="list-header">
-        <div class="list-meta">
-          共 {{ accounts.length }} 个账号，
-          <span class="ready">{{ readyCount() }} 个已配置 Token</span>
-          <span v-if="runningCount > 0" class="running-badge">🎮 {{ runningCount }} 个正在运行</span>
+    <!-- 主内容区 -->
+    <main class="main-content">
+      <!-- 操作栏 -->
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <span class="toolbar-meta">
+            共 <strong>{{ accounts.length }}</strong> 个账号，
+            <span class="text-green">{{ readyCount() }} 个已配置</span>
+          </span>
         </div>
-        <div class="list-actions">
-          <button class="btn btn-secondary" @click="openAddModal">+ 添加账号</button>
+        <div class="toolbar-right">
+          <button class="btn btn-secondary" @click="openAddModal">+ 添加</button>
           <button
             class="btn btn-primary"
             :disabled="batchLaunching || readyCount() === 0"
@@ -396,12 +372,14 @@ const readyCount = () => accounts.value.filter((a) => a.encrypted_token).length
         </div>
       </div>
 
-      <div v-if="batchMsg" class="batch-msg">{{ batchMsg }}</div>
-
-      <div v-if="accounts.length === 0" class="empty">
-        <p>暂无账号，点击「添加账号」开始</p>
+      <!-- 空状态 -->
+      <div v-if="accounts.length === 0" class="empty-state">
+        <div class="empty-icon">📂</div>
+        <p>暂无账号</p>
+        <p class="empty-hint">点击「+ 添加」开始</p>
       </div>
 
+      <!-- 账号卡片列表 -->
       <AccountCard
         v-for="account in accounts"
         :key="account.id"
@@ -411,12 +389,8 @@ const readyCount = () => accounts.value.filter((a) => a.encrypted_token).length
         @edit="openEditModal"
         @delete="handleDelete"
         @launch="handleLaunchAccount"
+        @kill="handleKillProcess"
       />
-    </main>
-
-    <!-- 设置页 -->
-    <main v-else-if="tab === 'settings'" class="main-content">
-      <SettingsPanel @accounts-updated="loadAccounts" />
     </main>
 
     <!-- 添加/编辑弹窗 -->
@@ -427,161 +401,189 @@ const readyCount = () => accounts.value.filter((a) => a.encrypted_token).length
       @save="handleSave"
     />
 
-    <!-- 等待登录完成遮罩层 -->
-    <transition name="fade">
+    <!-- 设置弹窗 -->
+    <SettingsModal
+      :visible="showSettings"
+      @close="showSettings = false"
+      @accounts-updated="loadAccounts"
+    />
+
+    <!-- 等待登录遮罩 -->
+    <Transition name="fade">
       <div v-if="waitingForLogin" class="login-overlay">
         <div class="login-overlay-content">
           <div class="spinner"></div>
           <div class="login-text">
-            <div class="login-title">🔐 正在等待登录完成</div>
+            <div class="login-title">🔐 等待登录</div>
             <div class="login-account">{{ waitingForLogin.accountName }}</div>
-            <div class="login-hint">请在游戏中完成登录并进入角色选择界面</div>
-            <div class="login-warning">⚠️ 在此期间请勿关闭游戏或启动其他账号</div>
+            <div class="login-hint">请在游戏中完成登录并到达角色选择界面</div>
+            <div class="login-warning">⚠️ 请勿关闭游戏或启动其他账号</div>
           </div>
         </div>
       </div>
-    </transition>
+    </Transition>
+
+    <!-- 全局 Toast -->
+    <ToastContainer />
+
+    <!-- 全局确认弹窗 -->
+    <ConfirmDialog ref="confirmRef" />
   </div>
 </template>
 
 <style>
+/* ========== 全局重置 ========== */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
   background: #0d1117;
   color: #e2e8f0;
-  font-family: 'Segoe UI', system-ui, sans-serif;
-  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font-size: 13px;
   height: 100vh;
   overflow: hidden;
   user-select: none;
   -webkit-user-select: none;
-  -moz-user-select: none;
-  -ms-user-select: none;
 }
 
-input, textarea {
-  user-select: text;
-  -webkit-user-select: text;
-  -moz-user-select: text;
-  -ms-user-select: text;
-}
+input, textarea { user-select: text; -webkit-user-select: text; }
+
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2d3050; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #3d4060; }
 
 #app { height: 100vh; display: flex; flex-direction: column; }
+</style>
 
+<style scoped>
 .app { display: flex; flex-direction: column; height: 100vh; }
 
+/* ========== 顶栏 ========== */
 .topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 20px;
-  height: 52px;
+  padding: 0 16px;
+  height: 44px;
   background: #161b2e;
   border-bottom: 1px solid #1e2540;
   flex-shrink: 0;
 }
-.topbar-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 16px;
+
+.topbar-left { display: flex; align-items: center; gap: 8px; }
+
+.app-title {
+  font-size: 14px;
   font-weight: 700;
   color: #f1f5f9;
+  letter-spacing: -0.01em;
 }
-.topbar-icon {
-  width: 22px;
-  height: 22px;
-  filter: drop-shadow(0 0 6px #3b82f6aa);
+
+.topbar-center { display: flex; align-items: center; }
+
+.status-badge {
+  font-size: 12px;
+  color: #64748b;
+  padding: 3px 10px;
+  border-radius: 10px;
+  background: rgba(100, 116, 139, 0.1);
+  border: 1px solid rgba(100, 116, 139, 0.2);
 }
-.tabs { display: flex; gap: 4px; }
-.tab-btn {
-  padding: 6px 16px;
+
+.status-badge.status-ready {
+  color: #86efac;
+  background: rgba(74, 222, 128, 0.08);
+  border-color: rgba(74, 222, 128, 0.2);
+}
+
+.topbar-right { display: flex; align-items: center; gap: 4px; }
+
+.btn-icon {
   background: transparent;
   border: none;
-  border-radius: 6px;
   cursor: pointer;
-  color: #94a3b8;
-  font-size: 13px;
-  font-weight: 500;
-  transition: background 0.15s, color 0.15s;
+  font-size: 16px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  transition: background 0.15s;
 }
-.tab-btn:hover { background: #1e2a45; color: #e2e8f0; }
-.tab-btn.active { background: #1e3a6e; color: #60a5fa; }
 
+.btn-icon:hover { background: rgba(255, 255, 255, 0.06); }
+
+/* ========== 主内容 ========== */
 .main-content {
   flex: 1;
   overflow-y: auto;
-  padding: 20px 24px;
+  padding: 14px 16px;
 }
 
-.list-header {
+/* ========== 工具栏 ========== */
+.toolbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
-}
-.list-meta { 
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 13px; 
-  color: #64748b; 
-}
-.list-meta .ready { color: #86efac; }
-.list-meta .running-badge {
-  padding: 4px 10px;
-  border-radius: 12px;
-  background: rgba(74, 222, 128, 0.15);
-  color: #4ade80;
-  font-weight: 500;
-  border: 1px solid rgba(74, 222, 128, 0.3);
-}
-.list-actions { display: flex; gap: 8px; }
-
-.batch-msg {
-  background: #1e2030;
-  border: 1px solid #2d3050;
-  border-radius: 6px;
-  padding: 8px 14px;
   margin-bottom: 12px;
-  font-size: 13px;
+}
+
+.toolbar-meta {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.toolbar-meta strong {
   color: #cbd5e1;
+  font-weight: 600;
 }
 
-.empty {
-  text-align: center;
-  padding: 60px 0;
-  color: #475569;
-  font-size: 15px;
-}
+.text-green { color: #86efac; }
 
+.toolbar-right { display: flex; gap: 6px; }
+
+/* ========== 按钮 ========== */
 .btn {
-  padding: 7px 16px;
+  padding: 6px 14px;
   border: none;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
+  transition: all 0.15s;
+  white-space: nowrap;
 }
-.btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.btn-primary   { background: #3b82f6; color: #fff; }
+
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.btn-primary { background: #3b82f6; color: #fff; }
 .btn-primary:not(:disabled):hover { background: #2563eb; }
+
 .btn-secondary { background: #1e2a3a; color: #94a3b8; border: 1px solid #2d3050; }
-.btn-secondary:hover { background: #253348; color: #e2e8f0; }
+.btn-secondary:not(:disabled):hover { background: #253348; color: #e2e8f0; }
 
-/* 滚动条 */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #2d3050; border-radius: 3px; }
+/* ========== 空状态 ========== */
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: #475569;
+}
 
-/* 等待登录遮罩层 */
+.empty-icon { font-size: 40px; margin-bottom: 12px; opacity: 0.5; }
+
+.empty-state p {
+  margin: 0;
+  font-size: 14px;
+}
+
+.empty-hint {
+  font-size: 12px !important;
+  margin-top: 4px !important;
+  color: #374151 !important;
+}
+
+/* ========== 等待登录遮罩 ========== */
 .login-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  inset: 0;
   background: rgba(13, 17, 23, 0.85);
   backdrop-filter: blur(8px);
   display: flex;
@@ -594,33 +596,21 @@ input, textarea {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 24px;
-  padding: 48px 64px;
+  gap: 20px;
+  padding: 40px 56px;
   background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
-  border-radius: 16px;
+  border-radius: 14px;
   border: 1px solid rgba(59, 130, 246, 0.3);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-  animation: slideIn 0.3s ease-out;
-}
-
-@keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateY(-20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 .spinner {
-  width: 64px;
-  height: 64px;
-  border: 4px solid rgba(59, 130, 246, 0.2);
+  width: 48px;
+  height: 48px;
+  border: 3px solid rgba(59, 130, 246, 0.2);
   border-top-color: #3b82f6;
   border-radius: 50%;
-  animation: spin 1s linear infinite;
+  animation: spin 0.8s linear infinite;
 }
 
 @keyframes spin {
@@ -631,173 +621,42 @@ input, textarea {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   text-align: center;
 }
 
 .login-title {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 700;
   color: #f1f5f9;
-  letter-spacing: -0.02em;
 }
 
 .login-account {
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 800;
   color: #60a5fa;
-  text-shadow: 0 0 16px rgba(96, 165, 250, 0.4);
-  letter-spacing: -0.03em;
+  text-shadow: 0 0 14px rgba(96, 165, 250, 0.4);
 }
 
 .login-hint {
-  font-size: 14px;
+  font-size: 13px;
   color: #94a3b8;
-  margin-top: 8px;
+  margin-top: 4px;
 }
 
 .login-warning {
-  font-size: 13px;
+  font-size: 12px;
   color: #fbbf24;
-  background: rgba(251, 191, 36, 0.1);
-  padding: 8px 16px;
+  background: rgba(251, 191, 36, 0.08);
+  padding: 6px 14px;
   border-radius: 6px;
-  border: 1px solid rgba(251, 191, 36, 0.2);
-  margin-top: 8px;
+  border: 1px solid rgba(251, 191, 36, 0.15);
+  margin-top: 4px;
 }
 
-/* 淡入淡出动画 */
+/* ========== 淡入淡出 ========== */
 .fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.3s ease;
-}
-
+.fade-leave-active { transition: opacity 0.25s ease; }
 .fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-</style>
-
-
-<style scoped>
-.logo.vite:hover {
-  filter: drop-shadow(0 0 2em #747bff);
-}
-
-.logo.vue:hover {
-  filter: drop-shadow(0 0 2em #249b73);
-}
-
-</style>
-<style>
-:root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 400;
-
-  color: #0f0f0f;
-  background-color: #f6f6f6;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100%;
-}
-
-.container {
-  margin: 0;
-  padding-top: 10vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  text-align: center;
-}
-
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: 0.75s;
-}
-
-.logo.tauri:hover {
-  filter: drop-shadow(0 0 2em #24c8db);
-}
-
-.row {
-  display: flex;
-  justify-content: center;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-
-a:hover {
-  color: #535bf2;
-}
-
-h1 {
-  text-align: center;
-}
-
-input,
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  color: #0f0f0f;
-  background-color: #ffffff;
-  transition: border-color 0.25s;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
-}
-
-button {
-  cursor: pointer;
-}
-
-button:hover {
-  border-color: #396cd8;
-}
-button:active {
-  border-color: #396cd8;
-  background-color: #e8e8e8;
-}
-
-input,
-button {
-  outline: none;
-}
-
-#greet-input {
-  margin-right: 5px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f6f6f6;
-    background-color: #2f2f2f;
-  }
-
-  a:hover {
-    color: #24c8db;
-  }
-
-  input,
-  button {
-    color: #ffffff;
-    background-color: #0f0f0f98;
-  }
-  button:active {
-    background-color: #0f0f0f69;
-  }
-}
-
+.fade-leave-to { opacity: 0; }
 </style>

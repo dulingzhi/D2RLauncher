@@ -1,41 +1,38 @@
 <template>
-  <div v-if="visible" class="login-dialog-overlay" @click.self="onCancel">
-    <div class="login-dialog">
-      <div class="dialog-header">
-        <h3>🔐 Battle.net 自动登录</h3>
-        <button class="close-btn" @click="onCancel">✕</button>
-      </div>
-      <div class="dialog-body">
-        <div class="login-message">
-          <div class="status-icon">🚀</div>
-          <h4>登录窗口已打开</h4>
-          <p class="hint">请在弹出的窗口中完成 Battle.net 登录</p>
-          
-          <div class="steps">
-            <div class="step">
-              <span class="step-number">1</span>
-              <span class="step-text">在登录窗口中输入账号密码</span>
-            </div>
-            <div class="step">
-              <span class="step-number">2</span>
-              <span class="step-text">完成登录验证</span>
-            </div>
-            <div class="step">
-              <span class="step-number">3</span>
-              <span class="step-text"><strong>自动提取 Token 并返回</strong> ✨</span>
-            </div>
+  <Teleport to="body">
+    <Transition name="login-dialog">
+      <div v-if="visible" class="login-overlay" @click.self="onCancel">
+        <div class="login-dialog">
+          <div class="dialog-header">
+            <h3>🔐 Battle.net 自动登录</h3>
+            <button class="close-btn" @click="onCancel" title="关闭">✕</button>
           </div>
 
-          <div class="auto-notice">
-            <div class="spinner"></div>
-            <p>等待登录完成，Token 将自动提取...</p>
-          </div>
+          <div class="dialog-body">
+            <div class="steps">
+              <div class="step">
+                <span class="step-num">1</span>
+                <span>在弹出窗口中输入账号密码</span>
+              </div>
+              <div class="step">
+                <span class="step-num">2</span>
+                <span>完成登录验证</span>
+              </div>
+              <div class="step">
+                <span class="step-num">3</span>
+                <span><strong>自动提取 Token</strong> ✨</span>
+              </div>
+            </div>
 
-          <p class="hint-note">💡 无需手动复制粘贴，登录成功后会自动获取 Token</p>
+            <div class="auto-notice">
+              <div class="spinner"></div>
+              <p>等待登录完成，Token 将自动提取</p>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
-  </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
@@ -58,245 +55,173 @@ let unlistenCancel: (() => void) | null = null
 
 const initLogin = async () => {
   try {
-    // 监听 token 捕获事件
     unlistenToken = await listen<{ account_id: string; token: string }>(
       'token_captured',
       (event) => {
         if (event.payload.account_id === props.accountId) {
-          console.log('✅ 自动捕获 token:', event.payload.token)
           emit('tokenCaptured', event.payload.token)
           cleanup()
         }
       }
     )
 
-    // 监听登录窗口关闭事件
     unlistenCancel = await listen<{ account_id: string }>(
       'login_cancelled',
       (event) => {
         if (event.payload.account_id === props.accountId) {
-          console.log('🚪 用户关闭了登录窗口')
           emit('cancel')
           cleanup()
         }
       }
     )
 
-    // 调用后端命令打开登录页面（自动捕获模式）
     await invoke('open_login_with_navigation', { accountId: props.accountId })
-    
-    console.log('🚀 Battle.net 登录窗口已打开（自动捕获模式）')
-    
   } catch (error) {
-    console.error('❌ 初始化登录失败:', error)
+    console.error('初始化登录失败:', error)
     emit('cancel')
   }
 }
 
 const cleanup = () => {
-  if (unlistenToken) {
-    unlistenToken()
-    unlistenToken = null
-  }
-  if (unlistenCancel) {
-    unlistenCancel()
-    unlistenCancel = null
-  }
+  if (unlistenToken) { unlistenToken(); unlistenToken = null }
+  if (unlistenCancel) { unlistenCancel(); unlistenCancel = null }
 }
 
-const onCancel = () => {
-  cleanup()
-  emit('cancel')
-}
+const onCancel = () => { cleanup(); emit('cancel') }
 
 watch(() => props.visible, async (newVal) => {
-  if (newVal) {
-    await initLogin()
-  } else {
-    cleanup()
-  }
+  if (newVal) await initLogin()
+  else cleanup()
 })
 
-onUnmounted(() => {
-  cleanup()
-})
+onUnmounted(() => { cleanup() })
 </script>
 
 <style scoped>
-.login-dialog-overlay {
+.login-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 9999;
+  z-index: 10001;
 }
 
 .login-dialog {
-  background: #1a1a1a;
-  border-radius: 16px;
-  width: 90%;
-  max-width: 520px;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  background: #161b2e;
+  border: 1px solid #2d3050;
+  border-radius: 12px;
+  width: 400px;
+  max-width: 90vw;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
 }
 
 .dialog-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 20px 24px;
-  border-bottom: 1px solid #333;
+  padding: 14px 20px;
+  border-bottom: 1px solid #1e2540;
 }
 
 .dialog-header h3 {
   margin: 0;
-  color: #fff;
-  font-size: 18px;
+  font-size: 15px;
   font-weight: 600;
+  color: #e2e8f0;
 }
 
 .close-btn {
   background: transparent;
   border: none;
-  color: #888;
-  font-size: 24px;
-  cursor: pointer;
-  padding: 0;
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  transition: all 0.2s;
-}
-
-.close-btn:hover {
-  background: #333;
-  color: #fff;
-}
-
-.dialog-body {
-  padding: 32px 24px;
-}
-
-.login-message {
-  color: #e2e8f0;
-}
-
-.status-icon {
-  font-size: 48px;
-  text-align: center;
-  margin-bottom: 16px;
-  animation: bounce 2s ease-in-out infinite;
-}
-
-@keyframes bounce {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-10px); }
-}
-
-.login-message h4 {
-  color: #fff;
-  margin: 0 0 8px 0;
+  color: #64748b;
   font-size: 18px;
-  font-weight: 500;
-  text-align: center;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: all 0.15s;
 }
 
-.hint {
-  font-size: 14px;
-  color: #94a3b8;
-  margin: 8px 0 24px;
-  text-align: center;
-}
+.close-btn:hover { background: rgba(148, 163, 184, 0.12); color: #e2e8f0; }
+
+.dialog-body { padding: 20px; }
 
 .steps {
-  background: #0f172a;
-  border-radius: 12px;
-  padding: 20px;
-  margin-bottom: 24px;
+  background: #0d1117;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
 }
 
 .step {
   display: flex;
-  align-items: flex-start;
-  margin-bottom: 12px;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
 }
 
-.step:last-child {
-  margin-bottom: 0;
-}
+.step:last-child { margin-bottom: 0; }
 
-.step-number {
-  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+.step-num {
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
   color: white;
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
-  font-weight: bold;
-  margin-right: 12px;
+  font-size: 10px;
+  font-weight: 700;
   flex-shrink: 0;
 }
 
-.step-text {
+.step {
   color: #cbd5e1;
-  font-size: 14px;
-  line-height: 1.6;
-  padding-top: 2px;
+  font-size: 13px;
+  line-height: 1.4;
 }
 
-.step-text strong {
-  color: #fbbf24;
-}
+.step strong { color: #fbbf24; }
 
 .auto-notice {
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(37, 99, 235, 0.1) 100%);
-  border: 1px solid rgba(59, 130, 246, 0.3);
-  border-radius: 12px;
-  padding: 20px;
-  margin-bottom: 16px;
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: 8px;
+  padding: 12px 16px;
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
 }
 
 .spinner {
-  border: 3px solid #334155;
-  border-top: 3px solid #3b82f6;
+  border: 2px solid #2d3050;
+  border-top: 2px solid #3b82f6;
   border-radius: 50%;
-  width: 32px;
-  height: 32px;
-  animation: spin 1s linear infinite;
+  width: 20px;
+  height: 20px;
+  animation: spin 0.8s linear infinite;
   flex-shrink: 0;
 }
 
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
+@keyframes spin { to { transform: rotate(360deg); } }
 
 .auto-notice p {
   margin: 0;
-  color: #cbd5e1;
-  font-size: 14px;
+  color: #94a3b8;
+  font-size: 12px;
   font-weight: 500;
 }
 
-.hint-note {
-  text-align: center;
-  font-size: 12px;
-  color: #64748b;
-  margin: 0;
+.login-dialog-enter-active,
+.login-dialog-leave-active { transition: all 0.2s ease; }
+
+.login-dialog-enter-from,
+.login-dialog-leave-to {
+  opacity: 0;
+  transform: scale(0.96) translateY(-6px);
 }
 </style>
