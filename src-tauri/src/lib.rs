@@ -7,6 +7,7 @@ pub mod settings;
 pub mod game_monitor;
 pub mod token_monitor;
 pub mod embedded_resources;
+pub mod updater;
 
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
@@ -51,6 +52,10 @@ pub fn run() {
             game_monitor::start_game_monitoring,
             game_monitor::stop_game_monitoring,
             game_monitor::kill_game_process,
+            // updater
+            updater::check_update,
+            updater::perform_self_update,
+            updater::cleanup_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

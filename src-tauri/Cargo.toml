@@ -28,6 +28,7 @@ base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 csv = "1.3"
 sysinfo = "0.32"
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"

@@ -2,8 +2,6 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import { check } from '@tauri-apps/plugin-updater'
-import { relaunch } from '@tauri-apps/plugin-process'
 import { getVersion } from '@tauri-apps/api/app'
 import AccountCard from './components/AccountCard.vue'
 import AccountModal from './components/AccountModal.vue'
@@ -52,41 +50,51 @@ async function loadAccounts() {
 const runningCount = computed(() => runningGames.value.size)
 
 onMounted(async () => {
+  // 清理上次更新残留的临时文件
+  try {
+    await invoke('cleanup_update')
+  } catch {
+    // ignore
+  }
+
   // 检查更新（仅生产环境）
   if (import.meta.env.PROD) {
     try {
       const currentVersion = await getVersion()
-      const update = await check()
-      if (update && update.version !== currentVersion) {
+      const updateInfo = await invoke<{
+        version: string
+        notes: string | null
+        pub_date: string | null
+        download_url: string
+      } | null>('check_update')
+      if (updateInfo) {
         const ok = await confirmRef.value?.confirm({
           title: '发现新版本',
-          message: `当前版本 ${currentVersion}，新版本 ${update.version}\n\n更新内容：\n${update.body}\n\n是否立即下载并安装？`,
+          message: `当前版本 ${currentVersion}，新版本 ${updateInfo.version}\n\n更新内容：\n${updateInfo.notes || ''}\n\n是否立即下载并安装？`,
           confirmText: '下载更新',
         })
         if (ok) {
           const progressToast = info('正在下载更新...', 0)
-          let downloaded = 0
-          let contentLength = 0
 
-          await update.downloadAndInstall((event) => {
-            switch (event.event) {
-              case 'Started':
-                contentLength = event.data.contentLength || 0
-                break
-              case 'Progress':
-                downloaded += event.data.chunkLength
-                const percent = contentLength > 0 ? ((downloaded / contentLength) * 100).toFixed(0) : '0'
-                updateToast(progressToast.id, `下载进度: ${percent}%`)
-                break
-              case 'Finished':
-                updateToast(progressToast.id, '下载完成，准备安装...')
-                break
-            }
-          })
+          // 监听下载进度事件
+          const unlistenProgress = await listen<{ downloaded: number; total: number }>(
+            'update-download-progress',
+            (event) => {
+              const { downloaded, total } = event.payload
+              const percent = total > 0 ? ((downloaded / total) * 100).toFixed(0) : '0'
+              updateToast(progressToast.id, `下载进度: ${percent}%`)
+            },
+          )
 
-          removeToast(progressToast.id)
-          success('更新安装完成，正在重启...')
-          await relaunch()
+          try {
+            await invoke('perform_self_update', { downloadUrl: updateInfo.download_url })
+            // perform_self_update 会退出当前进程并启动批处理脚本替换 exe
+            // 下面的代码不会执行，但保留以处理意外情况
+          } catch (e) {
+            toastError(`更新失败: ${e}`)
+          } finally {
+            unlistenProgress()
+          }
         }
       }
     } catch {
