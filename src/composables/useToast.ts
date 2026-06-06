@@ -37,6 +37,8 @@ export function useToast() {
     if (toast.duration > 0) {
       setTimeout(() => remove(id), toast.duration)
     }
+
+    return toast
   }
 
   function remove(id: number) {
@@ -62,13 +64,13 @@ export function useToast() {
     return add('info', message, duration)
   }
   function success(message: string, duration?: number) {
-    add('success', message, duration)
+    return add('success', message, duration)
   }
   function warning(message: string, duration?: number) {
-    add('warning', message, duration)
+    return add('warning', message, duration)
   }
   function error(message: string, duration?: number) {
-    add('error', message, duration)
+    return add('error', message, duration)
   }
 
   return { toasts, add, update, remove, clear, info, success, warning, error }
