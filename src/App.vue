@@ -11,7 +11,7 @@ import ConfirmDialog from './components/ConfirmDialog.vue'
 import { useToast } from './composables/useToast'
 import type { Account } from './types'
 
-const { success, error: toastError, warning, info, update: updateToast, remove: removeToast } = useToast()
+const { success, error: toastError, warning, info, update: updateToast } = useToast()
 
 interface GameInstance {
   account_id: string
