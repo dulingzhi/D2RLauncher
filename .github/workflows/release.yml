@@ -151,8 +151,9 @@ jobs:
 
       - name: Generate latest.json for Tauri updater
         run: |
-          # 去掉 v 前缀，确保 version 字段为纯数字格式（如 0.1.3），与 CARGO_PKG_VERSION / tauri.conf.json 一致
-          $version = "${{ github.ref_name }}" -replace '^v', ''
+          # 保留原始 tag 名（如 v0.1.3）用于下载 URL，去掉 v 前缀的版本号用于 version 字段
+          $tag = "${{ github.ref_name }}"
+          $version = $tag -replace '^v', ''
           $exePath = "src-tauri\target\release\d2r-launcher.exe"
           $sigPath = "$exePath.sig"
           
@@ -182,7 +183,7 @@ jobs:
             platforms = @{
               "windows-x86_64" = @{
                 signature = $signature.Trim()
-                url = "https://github.com/dulingzhi/D2RLauncher/releases/download/$version/d2r-launcher.exe"
+                url = "https://github.com/dulingzhi/D2RLauncher/releases/download/$tag/d2r-launcher.exe"
               }
             }
           } | ConvertTo-Json -Depth 10
