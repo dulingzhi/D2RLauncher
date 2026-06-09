@@ -188,8 +188,8 @@ jobs:
             }
           } | ConvertTo-Json -Depth 10
           
-          # 保存到文件
-          $json | Out-File -FilePath latest.json -Encoding utf8
+          # 保存到文件（使用 UTF8NoBOM 避免 JSON 解析时 BOM 干扰）
+          [System.IO.File]::WriteAllText("latest.json", $json)
           Write-Host "Generated latest.json:"
           Get-Content latest.json
 

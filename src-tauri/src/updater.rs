@@ -82,7 +82,8 @@ pub async fn check_update() -> Result<Option<UpdateInfo>, String> {
 
     // 当前版本（来自 Cargo.toml，不含 v 前缀）
     let current = env!("CARGO_PKG_VERSION");
-    let latest_ver = latest.version.strip_prefix('v').unwrap_or(&latest.version);
+    // trim() 清除可能的 BOM/空白字符，strip_prefix 去掉 v 前缀
+    let latest_ver = latest.version.trim().trim_start_matches('v');
 
     if latest_ver == current {
         return Ok(None);
