@@ -151,7 +151,8 @@ jobs:
 
       - name: Generate latest.json for Tauri updater
         run: |
-          $version = "${{ github.ref_name }}"
+          # 去掉 v 前缀，确保 version 字段为纯数字格式（如 0.1.3），与 CARGO_PKG_VERSION / tauri.conf.json 一致
+          $version = "${{ github.ref_name }}" -replace '^v', ''
           $exePath = "src-tauri\target\release\d2r-launcher.exe"
           $sigPath = "$exePath.sig"
           
