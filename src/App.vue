@@ -61,12 +61,14 @@ onMounted(async () => {
   if (import.meta.env.PROD) {
     try {
       const currentVersion = await getVersion()
+      console.log('[updater] currentVersion:', currentVersion)
       const updateInfo = await invoke<{
         version: string
         notes: string | null
         pub_date: string | null
         download_url: string
       } | null>('check_update')
+      console.log('[updater] updateInfo:', updateInfo)
       if (updateInfo) {
         const ok = await confirmRef.value?.confirm({
           title: '发现新版本',

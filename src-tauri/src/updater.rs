@@ -26,6 +26,7 @@ pub struct UpdateInfo {
     pub notes: Option<String>,
     pub pub_date: Option<String>,
     pub download_url: String,
+    pub current_version: String,
 }
 
 /// latest.json 结构
@@ -85,10 +86,26 @@ pub async fn check_update() -> Result<Option<UpdateInfo>, String> {
     // trim() 清除可能的 BOM/空白字符，strip_prefix 去掉 v 前缀
     let latest_ver = latest.version.trim().trim_start_matches('v');
 
+    eprintln!(
+        "[updater] current='{}' ({} bytes), latest='{}' ({} bytes), equal={}",
+        current,
+        current.len(),
+        latest_ver,
+        latest_ver.len(),
+        latest_ver == current,
+    );
+    eprintln!(
+        "[updater] current hex={:02x?}, latest hex={:02x?}",
+        current.as_bytes(),
+        latest_ver.as_bytes(),
+    );
+
     if latest_ver == current {
+        eprintln!("[updater] 版本相同，不更新");
         return Ok(None);
     }
 
+    eprintln!("[updater] 发现新版本，返回 Some");
     let platform = latest
         .platforms
         .get("windows-x86_64")
@@ -99,6 +116,7 @@ pub async fn check_update() -> Result<Option<UpdateInfo>, String> {
         notes: latest.notes,
         pub_date: latest.pub_date,
         download_url: platform.url.clone(),
+        current_version: current.to_string(),
     }))
 }
 

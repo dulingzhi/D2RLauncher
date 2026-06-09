@@ -1,6 +1,6 @@
 [package]
 name = "d2r-launcher"
-version = "0.1.0"
+version = "0.1.4"
 description = "A Diablo 2 Resurrected launcher with account management and mod support."
 authors = ["Jai"]
 edition = "2021"
