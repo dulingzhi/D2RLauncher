@@ -56,10 +56,10 @@ jobs:
           $conf | Out-File -FilePath src-tauri/tauri.conf.json -Encoding utf8 -NoNewline
           Write-Host "Updated tauri.conf.json version"
 
-          # 更新 Cargo.toml 中的 version 字段
-          $cargo = Get-Content src-tauri/Cargo.toml -Raw
-          $cargo = $cargo -replace '^version\s*=\s*"[^"]*"', "version = `"$version`""
-          $cargo | Out-File -FilePath src-tauri/Cargo.toml -Encoding utf8 -NoNewline
+          # 更新 Cargo.toml 中的 version 字段（逐行替换，避免 ^ 在多行中失效）
+          $cargoLines = Get-Content src-tauri/Cargo.toml
+          $cargoLines = $cargoLines -replace '^version\s*=\s*"[^"]*"', "version = `"$version`""
+          $cargoLines | Out-File -FilePath src-tauri/Cargo.toml -Encoding utf8
           Write-Host "Updated Cargo.toml version"
 
           # 验证注入结果
