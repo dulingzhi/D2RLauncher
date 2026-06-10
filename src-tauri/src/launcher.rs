@@ -4,6 +4,13 @@ use std::thread;
 use std::time::Duration;
 use tauri::{Emitter, Manager};
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+/// Windows 创建进程标志：不创建控制台窗口
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 use crate::token::{dpapi_decrypt_token, write_token_to_registry};
 use crate::accounts;
 use crate::settings;
@@ -239,7 +246,10 @@ fn kill_d2r_mutex_handle(handle_exe: &str, pid: u32) {
     let mutex_name = "DiabloII Check For Other Instances";
 
     // 第一步：查询互斥锁的 handle ID（不需要管理员权限）
-    let query_output = Command::new(handle_exe)
+    let mut cmd = Command::new(handle_exe);
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let query_output = cmd
         .args([
             "-accepteula",
             "-nobanner",
@@ -287,7 +297,10 @@ fn kill_d2r_mutex_handle(handle_exe: &str, pid: u32) {
         handle_exe, pid, handle_id
     );
 
-    let close_output = Command::new("powershell")
+    let mut ps_cmd_proc = Command::new("powershell");
+    #[cfg(windows)]
+    ps_cmd_proc.creation_flags(CREATE_NO_WINDOW);
+    let close_output = ps_cmd_proc
         .args(["-NoProfile", "-NonInteractive", "-Command", &ps_cmd])
         .output();
 
