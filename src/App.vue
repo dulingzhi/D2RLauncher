@@ -43,6 +43,50 @@ const confirmRef = ref<InstanceType<typeof ConfirmDialog> | null>(null)
 let unlistenGameStatus: UnlistenFn | null = null
 let unlistenLoginComplete: UnlistenFn | null = null
 
+/** 异步检查更新，不阻塞主流程 */
+async function checkForUpdate() {
+  try {
+    const currentVersion = await getVersion()
+    console.log('[updater] currentVersion:', currentVersion)
+    const updateInfo = await invoke<{
+      version: string
+      notes: string | null
+      pub_date: string | null
+      download_url: string
+    } | null>('check_update')
+    console.log('[updater] updateInfo:', updateInfo)
+    if (!updateInfo) return
+
+    const ok = await confirmRef.value?.confirm({
+      title: '发现新版本',
+      message: `当前版本 ${currentVersion}，新版本 ${updateInfo.version}\n\n更新内容：\n${updateInfo.notes || ''}\n\n是否立即下载并安装？`,
+      confirmText: '下载更新',
+    })
+    if (!ok) return
+
+    const progressToast = info('正在下载更新...', 0)
+
+    const unlistenProgress = await listen<{ downloaded: number; total: number }>(
+      'update-download-progress',
+      (event) => {
+        const { downloaded, total } = event.payload
+        const percent = total > 0 ? ((downloaded / total) * 100).toFixed(0) : '0'
+        updateToast(progressToast.id, `下载进度: ${percent}%`)
+      },
+    )
+
+    try {
+      await invoke('perform_self_update', { downloadUrl: updateInfo.download_url })
+    } catch (e) {
+      toastError(`更新失败: ${e}`)
+    } finally {
+      unlistenProgress()
+    }
+  } catch {
+    // 静默处理更新检查失败
+  }
+}
+
 async function loadAccounts() {
   accounts.value = await invoke('get_accounts')
 }
@@ -51,57 +95,11 @@ const runningCount = computed(() => runningGames.value.size)
 
 onMounted(async () => {
   // 清理上次更新残留的临时文件
-  try {
-    await invoke('cleanup_update')
-  } catch {
-    // ignore
-  }
+  invoke('cleanup_update').catch(() => {})
 
-  // 检查更新（仅生产环境）
+  // 检查更新（异步，不阻塞启动）
   if (import.meta.env.PROD) {
-    try {
-      const currentVersion = await getVersion()
-      console.log('[updater] currentVersion:', currentVersion)
-      const updateInfo = await invoke<{
-        version: string
-        notes: string | null
-        pub_date: string | null
-        download_url: string
-      } | null>('check_update')
-      console.log('[updater] updateInfo:', updateInfo)
-      if (updateInfo) {
-        const ok = await confirmRef.value?.confirm({
-          title: '发现新版本',
-          message: `当前版本 ${currentVersion}，新版本 ${updateInfo.version}\n\n更新内容：\n${updateInfo.notes || ''}\n\n是否立即下载并安装？`,
-          confirmText: '下载更新',
-        })
-        if (ok) {
-          const progressToast = info('正在下载更新...', 0)
-
-          // 监听下载进度事件
-          const unlistenProgress = await listen<{ downloaded: number; total: number }>(
-            'update-download-progress',
-            (event) => {
-              const { downloaded, total } = event.payload
-              const percent = total > 0 ? ((downloaded / total) * 100).toFixed(0) : '0'
-              updateToast(progressToast.id, `下载进度: ${percent}%`)
-            },
-          )
-
-          try {
-            await invoke('perform_self_update', { downloadUrl: updateInfo.download_url })
-            // perform_self_update 会退出当前进程并启动批处理脚本替换 exe
-            // 下面的代码不会执行，但保留以处理意外情况
-          } catch (e) {
-            toastError(`更新失败: ${e}`)
-          } finally {
-            unlistenProgress()
-          }
-        }
-      }
-    } catch {
-      // 静默处理更新检查失败
-    }
+    checkForUpdate()
   }
 
   await loadAccounts()
