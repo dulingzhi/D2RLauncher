@@ -137,6 +137,8 @@ defineExpose({ confirm })
   font-size: 14px;
   color: #cbd5e1;
   line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .confirm-actions {
