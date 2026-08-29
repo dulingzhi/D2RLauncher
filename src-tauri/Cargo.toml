@@ -28,6 +28,9 @@ chrono = { version = "0.4", features = ["serde"] }
 csv = "1.3"
 sysinfo = "0.32"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+aes-gcm = "0.10"
+argon2 = "0.5"
+rand = "0.8"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"

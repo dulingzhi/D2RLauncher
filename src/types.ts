@@ -20,6 +20,16 @@ export interface Settings {
   rename_window: boolean
 }
 
+// 导入模式：与 Rust 端 backup::ImportMode 的 snake_case 序列化保持一致
+export type ImportMode = 'overwrite' | 'skip_existing' | 'replace_all'
+
+// 导入结果统计（与 Rust 端 backup::ImportStats 对应）
+export interface ImportResult {
+  imported: number
+  updated: number
+  skipped: number
+}
+
 export function tokenAge(token_set_at: number | null): string {
   if (!token_set_at) return '未设置'
   const now = Math.floor(Date.now() / 1000)

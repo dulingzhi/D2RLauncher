@@ -1,5 +1,6 @@
 pub mod models;
 pub mod accounts;
+pub mod backup;
 pub mod token;
 pub mod token_browser;
 pub mod launcher;
@@ -35,6 +36,9 @@ pub fn run() {
             accounts::save_token_for_account,
             accounts::batch_update_account_windows,
             accounts::reset_account_windows,
+            // backup
+            backup::export_accounts,
+            backup::import_accounts,
             // token
             token::open_login_window,
             token::write_token_to_registry,

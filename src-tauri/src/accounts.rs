@@ -16,7 +16,7 @@ fn accounts_path(app: &tauri::AppHandle) -> PathBuf {
         .join("accounts.json")
 }
 
-fn load_accounts(app: &tauri::AppHandle) -> Vec<Account> {
+pub(crate) fn load_accounts(app: &tauri::AppHandle) -> Vec<Account> {
     let path = accounts_path(app);
     if !path.exists() {
         return vec![];
@@ -25,7 +25,7 @@ fn load_accounts(app: &tauri::AppHandle) -> Vec<Account> {
     serde_json::from_str(&content).unwrap_or_default()
 }
 
-fn save_accounts(app: &tauri::AppHandle, accounts: &Vec<Account>) -> Result<(), String> {
+pub(crate) fn save_accounts(app: &tauri::AppHandle, accounts: &Vec<Account>) -> Result<(), String> {
     let path = accounts_path(app);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;

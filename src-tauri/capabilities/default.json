@@ -29,6 +29,7 @@
     "fs:allow-app-read-recursive",
     "fs:allow-app-write-recursive",
     "dialog:allow-open",
+    "dialog:allow-save",
     "process:default"
   ],
   "remote": {

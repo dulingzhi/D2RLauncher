@@ -85,7 +85,7 @@ jobs:
 
       - name: Install UPX
         run: |
-          $upxVersion = "4.2.4"
+          $upxVersion = "5.2.1"
           $upxUrl = "https://github.com/upx/upx/releases/download/v$upxVersion/upx-$upxVersion-win64.zip"
           Invoke-WebRequest -Uri $upxUrl -OutFile upx.zip
           Expand-Archive upx.zip -DestinationPath .

@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { open } from '@tauri-apps/plugin-dialog'
-import type { Settings, Account } from '../types'
+import { open, save as saveFileDialog } from '@tauri-apps/plugin-dialog'
+import type { Settings, Account, ImportResult } from '../types'
+import { useToast } from '../composables/useToast'
+import BackupPasswordDialog from './BackupPasswordDialog.vue'
 
 defineProps<{ visible: boolean }>()
 const emit = defineEmits<{
@@ -140,10 +142,67 @@ async function resetBatchLayout() {
     setTimeout(() => (batchMsg.value = ''), 3000)
   }
 }
+
+const toast = useToast()
+const backupDialog = ref<InstanceType<typeof BackupPasswordDialog> | null>(null)
+
+async function handleExport() {
+  const result = await backupDialog.value?.open('export')
+  if (!result) return
+
+  try {
+    const defaultName = `d2r-backup-${new Date().toISOString().slice(0, 10)}.json`
+    const path = await saveFileDialog({
+      title: '导出账号备份',
+      defaultPath: defaultName,
+      filters: [{ name: '加密备份文件', extensions: ['json'] }],
+    })
+    if (!path) return
+
+    const count = await invoke<number>('export_accounts', {
+      path,
+      password: result.password,
+    })
+    toast.success(`✅ 已导出 ${count} 个账号到加密备份`)
+  } catch (e: any) {
+    toast.error(`❌ 导出失败: ${e}`)
+  }
+}
+
+async function handleImport() {
+  try {
+    const path = await open({
+      title: '选择备份文件',
+      multiple: false,
+      directory: false,
+      filters: [{ name: '加密备份文件', extensions: ['json'] }],
+    })
+    if (!path || typeof path !== 'string') return
+
+    const result = await backupDialog.value?.open('import')
+    if (!result) return
+
+    const stats = await invoke<ImportResult>('import_accounts', {
+      path,
+      password: result.password,
+      mode: result.mode,
+    })
+    const parts = [`新增 ${stats.imported}`]
+    if (stats.updated > 0) parts.push(`更新 ${stats.updated}`)
+    if (stats.skipped > 0) parts.push(`跳过 ${stats.skipped}`)
+    toast.success(`✅ 导入完成：${parts.join('，')}`)
+
+    accounts.value = await invoke('get_accounts')
+    emit('accounts-updated')
+  } catch (e: any) {
+    toast.error(`❌ 导入失败: ${e}`)
+  }
+}
 </script>
 
 <template>
   <Teleport to="body">
+    <BackupPasswordDialog ref="backupDialog" />
     <Transition name="settings-modal">
       <div v-if="visible" class="settings-modal-overlay" @click.self="emit('close')">
         <div class="settings-modal">
@@ -246,6 +305,18 @@ async function resetBatchLayout() {
 
               <div class="reset-row">
                 <button class="btn btn-danger" @click="resetBatchLayout">🗑️ 清空所选窗口设置</button>
+              </div>
+            </div>
+
+            <!-- 数据管理 -->
+            <div class="section">
+              <h4>💾 数据管理</h4>
+              <p class="hint" style="margin-bottom: 10px">
+                导出全部账号（含认证 Token 和窗口设置）为密码加密的备份文件，可跨机器迁移；导入时需输入相同密码解密。
+              </p>
+              <div class="data-actions">
+                <button class="btn btn-secondary" @click="handleExport">📤 导出账号数据</button>
+                <button class="btn btn-secondary" @click="handleImport">📥 导入账号数据</button>
               </div>
             </div>
           </div>
@@ -490,6 +561,11 @@ input[type="number"]:focus {
 
 .reset-row {
   margin-top: 10px;
+}
+
+.data-actions {
+  display: flex;
+  gap: 8px;
 }
 
 /* Buttons */
