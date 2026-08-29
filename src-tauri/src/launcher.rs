@@ -56,19 +56,22 @@ pub fn launch_account(
 
     // 3. 拼接启动参数
     let d2r_exe = format!("{}\\D2R.exe", game_path.trim_end_matches('\\'));
-    let mut args: Vec<String> = vec!["-uid".to_string(), "osic".to_string()];
+    let mut args: Vec<String> = Vec::new();
 
     // 窗口位置参数（可选）
     if let (Some(_x), Some(_y)) = (account.window_x, account.window_y) {
         // D2R 不支持直接位置参数，使用自定义参数传递
     }
 
-    // 自定义参数
+    // 自定义参数（置于最前）
     if !account.custom_args.is_empty() {
         for arg in account.custom_args.split_whitespace() {
             args.push(arg.to_string());
         }
     }
+
+    args.push("-uid".to_string());
+    args.push("osic".to_string());
 
     // 4. 启动 D2R.exe
     let child = Command::new(&d2r_exe)
