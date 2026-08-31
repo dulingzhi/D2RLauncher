@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { open, save as saveFileDialog } from '@tauri-apps/plugin-dialog'
 import type { Settings, Account, ImportResult } from '../types'
@@ -14,6 +14,7 @@ const emit = defineEmits<{
 
 const settings = ref<Settings>({
   game_path: '',
+  game_paths: {},
   handle_path: '',
   launch_delay_secs: 5,
   wait_for_login: true,
@@ -83,6 +84,35 @@ async function browsePath() {
 
 function clearPath() {
   settings.value.game_path = ''
+  // 与后端归一逻辑一致：game_paths.osic 同步清空
+  if (settings.value.game_paths) delete settings.value.game_paths['osic']
+}
+
+const wowPath = computed({
+  get: () => settings.value.game_paths?.wow ?? '',
+  set: (v: string) => {
+    if (!settings.value.game_paths) settings.value.game_paths = {}
+    settings.value.game_paths.wow = v
+  },
+})
+
+async function browseWowPath() {
+  try {
+    const selected = await open({
+      title: '选择魔兽世界安装根目录（含 _retail_ / _classic_ 的目录）',
+      multiple: false,
+      directory: true,
+    })
+    if (selected && typeof selected === 'string') {
+      wowPath.value = selected
+    }
+  } catch (e) {
+    console.error('选择目录失败:', e)
+  }
+}
+
+function clearWowPath() {
+  wowPath.value = ''
 }
 
 function toggleSelectAll() {
@@ -220,12 +250,26 @@ async function handleImport() {
                 <div class="input-with-buttons">
                   <input
                     v-model="settings.game_path"
+                    type="text"
                     placeholder="如：C:\Program Files (x86)\Battle.net\Games\Diablo II Resurrected"
                   />
                   <button class="btn btn-secondary" @click="browsePath" type="button">📁 浏览</button>
                   <button class="btn btn-ghost" @click="clearPath" type="button">✕</button>
                 </div>
                 <p class="hint">程序会在此目录下查找 D2R.exe 并启动</p>
+              </div>
+              <div class="field">
+                <label>魔兽世界安装根目录</label>
+                <div class="input-with-buttons">
+                  <input
+                    v-model="wowPath"
+                    type="text"
+                    placeholder="如：C:\Program Files (x86)\World of Warcraft（含 _retail_、_classic_ 子目录）"
+                  />
+                  <button class="btn btn-secondary" @click="browseWowPath" type="button">📁 浏览</button>
+                  <button class="btn btn-ghost" @click="clearWowPath" type="button">✕</button>
+                </div>
+                <p class="hint">按账号分支自动查找 _retail_\Wow.exe、_classic_\WowClassic.exe、_classic_era_\WowClassic.exe、_classic_titan_\WowClassic.exe 或 _anniversary_\WowClassic.exe</p>
                 <p class="hint success">✅ Handle64.exe 已内置，无需单独配置</p>
               </div>
             </div>
@@ -490,6 +534,7 @@ input[type="number"]:focus {
 
 .input-with-buttons input {
   flex: 1;
+  min-width: 0;
 }
 
 .select-header {

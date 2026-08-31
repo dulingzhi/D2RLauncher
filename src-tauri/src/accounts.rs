@@ -44,18 +44,26 @@ pub fn get_accounts(app: tauri::AppHandle) -> Vec<Account> {
 pub fn add_account(
     app: tauri::AppHandle,
     label: String,
+    game: Option<String>,
+    flavor: Option<String>,
     custom_args: String,
     window_x: Option<i32>,
     window_y: Option<i32>,
     window_width: Option<i32>,
     window_height: Option<i32>,
 ) -> Result<Account, String> {
+    let game = game.unwrap_or_else(|| "osic".to_string());
+    if crate::games::get_game(&game).is_none() {
+        return Err(format!("不支持的游戏 uid: {}", game));
+    }
     let mut accounts = load_accounts(&app);
     let account = Account {
         id: Uuid::new_v4().to_string(),
         label,
         encrypted_token: None,
         token_set_at: None,
+        game,
+        flavor: flavor.unwrap_or_else(|| "retail".to_string()),
         custom_args,
         window_x,
         window_y,

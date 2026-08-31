@@ -189,6 +189,11 @@ struct BackupAccount {
     label: String,
     plain_token: Option<String>,
     token_set_at: Option<i64>,
+    /// 旧备份缺省为 osic / retail
+    #[serde(default = "default_backup_game")]
+    game: String,
+    #[serde(default = "default_backup_flavor")]
+    flavor: String,
     custom_args: String,
     window_x: Option<i32>,
     window_y: Option<i32>,
@@ -200,6 +205,14 @@ struct BackupAccount {
 #[derive(Serialize, Deserialize)]
 struct BackupPayload {
     accounts: Vec<BackupAccount>,
+}
+
+fn default_backup_game() -> String {
+    "osic".to_string()
+}
+
+fn default_backup_flavor() -> String {
+    "retail".to_string()
 }
 
 /// 导出全部账号（含认证 token）到密码加密的备份文件
@@ -233,6 +246,8 @@ pub fn export_accounts(
             label: acc.label.clone(),
             plain_token,
             token_set_at: acc.token_set_at,
+            game: acc.game.clone(),
+            flavor: acc.flavor.clone(),
             custom_args: acc.custom_args.clone(),
             window_x: acc.window_x,
             window_y: acc.window_y,
@@ -280,6 +295,8 @@ pub fn import_accounts(
             label: b.label,
             encrypted_token,
             token_set_at: b.token_set_at,
+            game: b.game,
+            flavor: b.flavor,
             custom_args: b.custom_args,
             window_x: b.window_x,
             window_y: b.window_y,
@@ -329,6 +346,8 @@ mod tests {
             label: label.to_string(),
             encrypted_token: None,
             token_set_at: None,
+            game: "osic".to_string(),
+            flavor: "retail".to_string(),
             custom_args: String::new(),
             window_x: None,
             window_y: None,

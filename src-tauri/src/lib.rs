@@ -1,4 +1,5 @@
 pub mod models;
+pub mod games;
 pub mod accounts;
 pub mod backup;
 pub mod token;
@@ -39,6 +40,8 @@ pub fn run() {
             // backup
             backup::export_accounts,
             backup::import_accounts,
+            // games
+            games::get_installed_flavors,
             // token
             token::open_login_window,
             token::write_token_to_registry,

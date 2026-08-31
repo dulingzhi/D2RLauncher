@@ -43,6 +43,8 @@ import { invoke } from '@tauri-apps/api/core'
 const props = defineProps<{
   visible: boolean
   accountId: string
+  /** 账号所属游戏 uid（osic / wow），决定登录页 app= 参数 */
+  game?: string
 }>()
 
 const emit = defineEmits<{
@@ -75,7 +77,10 @@ const initLogin = async () => {
       }
     )
 
-    await invoke('open_login_with_navigation', { accountId: props.accountId })
+    await invoke('open_login_with_navigation', {
+      accountId: props.accountId,
+      game: props.game || 'osic',
+    })
   } catch (error) {
     console.error('初始化登录失败:', error)
     emit('cancel')

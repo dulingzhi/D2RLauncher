@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 import type { Account } from '../types'
+import { GAME_OPTIONS, WOW_FLAVOR_OPTIONS } from '../types'
 
 const props = defineProps<{
   visible: boolean
@@ -12,17 +13,23 @@ const emit = defineEmits<{
 }>()
 
 const label = ref('')
+const game = ref<string>('osic')
+const flavor = ref<string>('retail')
 const customArgs = ref('')
 const windowX = ref<number | null>(null)
 const windowY = ref<number | null>(null)
 const windowWidth = ref<number | null>(null)
 const windowHeight = ref<number | null>(null)
 
+const isWow = computed(() => game.value === 'wow')
+
 watch(
   () => props.visible,
   (v) => {
     if (v && props.initial) {
       label.value = props.initial.label
+      game.value = props.initial.game || 'osic'
+      flavor.value = props.initial.flavor || 'retail'
       customArgs.value = props.initial.custom_args
       windowX.value = props.initial.window_x
       windowY.value = props.initial.window_y
@@ -30,6 +37,8 @@ watch(
       windowHeight.value = props.initial.window_height
     } else if (v) {
       label.value = ''
+      game.value = 'osic'
+      flavor.value = 'retail'
       customArgs.value = ''
       windowX.value = null
       windowY.value = null
@@ -49,6 +58,8 @@ function submit() {
 
   emit('save', {
     label: label.value.trim(),
+    game: game.value,
+    flavor: flavor.value,
     custom_args: customArgs.value.trim(),
     window_x: toNullableNumber(windowX.value),
     window_y: toNullableNumber(windowY.value),
@@ -72,6 +83,24 @@ function submit() {
             <div class="field">
               <label>显示名称</label>
               <input v-model="label" placeholder="如：小号1" required />
+            </div>
+
+            <div class="field">
+              <label>游戏</label>
+              <select v-model="game">
+                <option v-for="g in GAME_OPTIONS" :key="g.uid" :value="g.uid">
+                  {{ g.icon }} {{ g.label }}
+                </option>
+              </select>
+            </div>
+
+            <div class="field" v-if="isWow">
+              <label>默认客户端分支（启动时可再选）</label>
+              <select v-model="flavor">
+                <option v-for="f in WOW_FLAVOR_OPTIONS" :key="f.value" :value="f.value">
+                  {{ f.label }}（{{ f.folder }}）
+                </option>
+              </select>
             </div>
 
             <div class="field">
@@ -196,7 +225,8 @@ label {
   letter-spacing: 0.03em;
 }
 
-input {
+input,
+select {
   background: #0d1117;
   border: 1px solid #2d3050;
   border-radius: 6px;
@@ -207,7 +237,10 @@ input {
   transition: border-color 0.15s;
 }
 
-input:focus { border-color: #3b82f6; }
+input:focus,
+select:focus { border-color: #3b82f6; }
+
+select { cursor: pointer; }
 
 .modal-actions {
   display: flex;

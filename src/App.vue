@@ -8,8 +8,10 @@ import AccountModal from './components/AccountModal.vue'
 import SettingsModal from './components/SettingsModal.vue'
 import ToastContainer from './components/ToastContainer.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
+import FlavorSelectDialog from './components/FlavorSelectDialog.vue'
 import { useToast } from './composables/useToast'
 import type { Account } from './types'
+import { gameInfo } from './types'
 
 const { success, error: toastError, warning, info, update: updateToast } = useToast()
 
@@ -37,6 +39,8 @@ const runningGames = ref<Map<string, GameInstance>>(new Map())
 const launchQueue = ref<string[]>([])
 const currentLaunching = ref<string | null>(null)
 const waitingForLogin = ref<{ accountId: string; accountName: string } | null>(null)
+/** 分支选择弹窗状态（检测到多个已安装分支时触发） */
+const flavorDialog = ref<{ account: Account; flavors: string[] } | null>(null)
 
 const confirmRef = ref<InstanceType<typeof ConfirmDialog> | null>(null)
 
@@ -186,6 +190,8 @@ async function handleSave(data: Omit<Account, 'id' | 'encrypted_token' | 'token_
     } else {
       await invoke('add_account', {
         label: data.label,
+        game: data.game,
+        flavor: data.flavor,
         customArgs: data.custom_args,
         windowX: data.window_x,
         windowY: data.window_y,
@@ -235,27 +241,75 @@ async function handleKillProcess(processId: number, accountName: string) {
   }
 }
 
+/** 取指定游戏的安装目录（与后端 game_path_for 一致：优先 game_paths，osic 回退旧字段） */
+function gamePathFor(settings: any, game: string): string {
+  const fromMap = settings.game_paths?.[game]
+  if (fromMap && fromMap.trim() !== '') return fromMap
+  if (game === 'osic') return settings.game_path ?? ''
+  return ''
+}
+
+/** 实际执行启动（flavor 覆盖账号记忆值，用于单分支直启/弹窗选择结果） */
+async function doLaunch(account: Account, flavorOverride: string | null) {
+  const settings: any = await invoke('get_settings')
+
+  if (settings.wait_for_login) {
+    currentLaunching.value = account.id
+    waitingForLogin.value = { accountId: account.id, accountName: account.label }
+  }
+
+  await invoke('launch_account', {
+    accountId: account.id,
+    flavor: flavorOverride,
+  })
+
+  if (!settings.wait_for_login) {
+    currentLaunching.value = null
+    waitingForLogin.value = null
+  }
+}
+
 async function handleLaunchAccount(account: Account) {
   try {
     const settings: any = await invoke('get_settings')
+    const game = account.game || 'osic'
 
-    if (!settings.game_path || settings.game_path.trim() === '') {
-      warning('请先设置 D2R.exe 所在目录')
+    if (!gamePathFor(settings, game).trim()) {
+      warning(`请先在设置中配置「${gameInfo(game).label}」的安装目录`)
       showSettings.value = true
       return
     }
 
-    if (settings.wait_for_login) {
-      currentLaunching.value = account.id
-      waitingForLogin.value = { accountId: account.id, accountName: account.label }
+    // 多分支游戏：检测已装分支。装了多个才弹窗；只有一个直接用已装分支启动
+    const installed: string[] = await invoke('get_installed_flavors', { game })
+    if (installed.length >= 2) {
+      flavorDialog.value = { account, flavors: installed }
+      return
     }
+    await doLaunch(account, installed.length === 1 ? installed[0] : null)
+  } catch (e) {
+    toastError(`启动失败: ${e}`)
+    currentLaunching.value = null
+    waitingForLogin.value = null
+  }
+}
 
-    await invoke('launch_account', { accountId: account.id, gamePath: settings.game_path })
+/** 弹窗确认分支：记住本次选择后启动 */
+async function handleFlavorConfirm(flavor: string) {
+  const dlg = flavorDialog.value
+  if (!dlg) return
+  flavorDialog.value = null
 
-    if (!settings.wait_for_login) {
-      currentLaunching.value = null
-      waitingForLogin.value = null
-    }
+  try {
+    // 记住本次选择，作为下次弹窗预选项与批量启动的记忆值
+    await invoke('update_account', { account: { ...dlg.account, flavor } })
+    await loadAccounts()
+  } catch {
+    // 记忆失败不阻断启动
+  }
+
+  try {
+    await doLaunch(dlg.account, flavor)
   } catch (e) {
     toastError(`启动失败: ${e}`)
     currentLaunching.value = null
@@ -284,7 +338,11 @@ async function processLaunchQueue() {
 
   try {
     const settings: any = await invoke('get_settings')
-    await invoke('launch_account', { accountId, gamePath: settings.game_path })
+    const game = account.game || 'osic'
+    if (!gamePathFor(settings, game).trim()) {
+      throw new Error(`请先在设置中配置「${gameInfo(game).label}」的安装目录`)
+    }
+    await invoke('launch_account', { accountId })
 
     if (settings.wait_for_login) {
       waitingForLogin.value = { accountId, accountName: account.label }
@@ -317,9 +375,14 @@ async function launchAll() {
   }
 
   try {
+    // 逐账号校验安装目录（可能混合多个游戏），缺失即中止并提示
     const settings: any = await invoke('get_settings')
-    if (!settings.game_path || settings.game_path.trim() === '') {
-      warning('请先设置 D2R.exe 所在目录')
+    const missing = accounts.value.find(
+      (a) => a.encrypted_token && !gamePathFor(settings, a.game || 'osic').trim(),
+    )
+    if (missing) {
+      const game = missing.game || 'osic'
+      warning(`账号「${missing.label}」未配置「${gameInfo(game).label}」的安装目录`)
       showSettings.value = true
       return
     }
@@ -417,6 +480,16 @@ const readyCount = () => accounts.value.filter((a) => a.encrypted_token).length
       :visible="showSettings"
       @close="showSettings = false"
       @accounts-updated="loadAccounts"
+    />
+
+    <!-- 分支选择弹窗 -->
+    <FlavorSelectDialog
+      :visible="!!flavorDialog"
+      :account-name="flavorDialog?.account.label ?? ''"
+      :flavors="flavorDialog?.flavors ?? []"
+      :default-flavor="flavorDialog?.account.flavor"
+      @confirm="handleFlavorConfirm"
+      @cancel="flavorDialog = null"
     />
 
     <!-- 等待登录遮罩 -->

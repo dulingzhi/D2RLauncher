@@ -13,6 +13,7 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 use crate::token::{dpapi_decrypt_token, write_token_to_registry};
 use crate::accounts;
+use crate::games::{self, GameConfig};
 use crate::settings;
 use crate::token_monitor;
 use crate::embedded_resources;
@@ -24,15 +25,16 @@ use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProces
 #[cfg(windows)]
 use windows::core::PCWSTR;
 
-/// 启动单个账号的 D2R 实例
-/// 流程：解密 token → 写注册表 → 启动 D2R.exe → 等待后杀互斥锁句柄
+/// 启动单个账号的游戏实例（游戏由账号的 game 字段决定）
+/// flavor 可覆盖账号记忆的分支（如启动时检测到仅一个已装分支）
+/// 流程：解密 token → 写注册表 → 启动客户端 → 等待后杀互斥锁句柄（仅 D2R）
 #[tauri::command]
 pub fn launch_account(
     app: tauri::AppHandle,
     account_id: String,
-    game_path: String,
+    flavor: Option<String>,
 ) -> Result<(), String> {
-    // 1. 获取账号信息
+    // 1. 获取账号信息与游戏配置
     let accounts = accounts::get_accounts(app.clone());
     let account = accounts
         .iter()
@@ -40,7 +42,15 @@ pub fn launch_account(
         .ok_or_else(|| format!("Account {} not found", account_id))?
         .clone();
 
-    // 2. 解密并写入注册表
+    let cfg: &GameConfig = games::get_game(&account.game)
+        .ok_or_else(|| format!("不支持的游戏 uid: {}", account.game))?;
+
+    // 分支优先级：本次覆盖 > 账号记忆值
+    let flavor = flavor
+        .filter(|f| !f.trim().is_empty())
+        .unwrap_or_else(|| account.flavor.clone());
+
+    // 2. 解密并写入对应游戏的注册表键
     if let Some(encoded) = &account.encrypted_token {
         let encrypted = base64::Engine::decode(
             &base64::engine::general_purpose::STANDARD,
@@ -49,35 +59,37 @@ pub fn launch_account(
         .map_err(|e| format!("base64 decode failed: {}", e))?;
 
         let plain_token = dpapi_decrypt_token(&encrypted)?;
-        write_token_to_registry(plain_token)?;
+        write_token_to_registry(plain_token, cfg.uid.to_string())?;
     } else {
         return Err("此账号尚未设置 Token，请先获取 Token".to_string());
     }
 
-    // 3. 拼接启动参数
-    let d2r_exe = format!("{}\\D2R.exe", game_path.trim_end_matches('\\'));
+    // 3. 解析安装目录与启动参数
+    let settings = settings::get_settings(app.clone());
+    let game_path = settings::game_path_for(&settings, cfg.uid);
+    if game_path.trim().is_empty() {
+        return Err(format!("请先在设置中配置「{}」的安装目录", cfg.display_name));
+    }
+    let game_exe = cfg.resolve_exe(&game_path, &flavor)?;
+
     let mut args: Vec<String> = Vec::new();
 
-    // 窗口位置参数（可选）
-    if let (Some(_x), Some(_y)) = (account.window_x, account.window_y) {
-        // D2R 不支持直接位置参数，使用自定义参数传递
-    }
-
-    // 自定义参数（置于最前）
+    // 自定义参数（置于最前，避免被 uid 参数忽略）
     if !account.custom_args.is_empty() {
         for arg in account.custom_args.split_whitespace() {
             args.push(arg.to_string());
         }
     }
 
-    args.push("-uid".to_string());
-    args.push("osic".to_string());
+    for arg in cfg.launch_args {
+        args.push(arg.to_string());
+    }
 
-    // 4. 启动 D2R.exe
-    let child = Command::new(&d2r_exe)
+    // 4. 启动客户端
+    let child = Command::new(&game_exe)
         .args(&args)
         .spawn()
-        .map_err(|e| format!("Failed to launch D2R.exe: {}", e))?;
+        .map_err(|e| format!("Failed to launch {}: {}", game_exe.display(), e))?;
 
     let pid = child.id();
     
@@ -92,8 +104,7 @@ pub fn launch_account(
         eprintln!("⚠️ 无法获取 game_monitor 锁，PID 注册失败");
     }
 
-    // 获取设置
-    let settings = settings::get_settings(app.clone());
+    // 获取设置（路径已在上方读取）
     let wait_for_login = settings.wait_for_login;
     let login_timeout = settings.login_timeout_secs;
     let rename_window = settings.rename_window;
@@ -104,7 +115,7 @@ pub fn launch_account(
             eprintln!("⚠️ 获取内置 handle64.exe 失败: {}, 将跳过互斥锁处理", e);
             std::path::PathBuf::new()
         });
-    
+
     // 6. 后台线程：重命名窗口、等待并杀互斥锁句柄、监控登录状态
     let account_id_clone = account.id.clone();
     let account_name_clone = account.label.clone();
@@ -113,18 +124,22 @@ pub fn launch_account(
     let window_width = account.window_width;
     let window_height = account.window_height;
     let app_clone = app.clone();
-    
+    let game_name = cfg.display_name.to_string();
+    // 改名标题保留英文关键字，确保改名后窗口仍能被 game_monitor 识别
+    let rename_title = cfg.window_title_for(&account.label);
+    let mutex_name = cfg.mutex_name.map(|m| m.to_string());
+    let game_code = cfg.code.to_string();
+
     thread::spawn(move || {
         // 等待游戏窗口出现（延长到 5 秒）
         println!("⏰ 等待游戏窗口出现...");
         thread::sleep(Duration::from_secs(5));
-        
+
         // 重命名游戏窗口（可选功能，仅在启用时执行）
         if rename_window {
             #[cfg(windows)]
             {
-                // 新标题格式：直接使用账号名称，方便识别
-                let new_title = format!("{} - Diablo II: Resurrected", account_name_clone);
+                let new_title = rename_title.clone();
                 println!("🏷️  尝试重命名窗口为: {}", new_title);
                 
                 match rename_d2r_window(pid, &new_title) {
@@ -159,20 +174,24 @@ pub fn launch_account(
             }
         }
         
-        // 杀互斥锁句柄（使用内置的 handle64.exe）
-        if handle_path.exists() {
-            println!("🔓 尝试关闭互斥锁句柄...");
-            let handle_path_str = handle_path.to_string_lossy().to_string();
-            kill_d2r_mutex_handle(&handle_path_str, pid);
-            println!("✅ 互斥锁处理完成");
+        // 杀互斥锁句柄（使用内置的 handle64.exe，仅配置了互斥锁名的游戏）
+        if let Some(mutex) = mutex_name.as_deref() {
+            if handle_path.exists() {
+                println!("🔓 尝试关闭互斥锁句柄...");
+                let handle_path_str = handle_path.to_string_lossy().to_string();
+                kill_mutex_handle(&handle_path_str, pid, mutex);
+                println!("✅ 互斥锁处理完成");
+            } else {
+                println!("⚠️  内置 handle64.exe 不可用，跳过互斥锁处理");
+            }
         } else {
-            println!("⚠️  内置 handle64.exe 不可用，跳过互斥锁处理");
+            println!("⏭️  {} 无需互斥锁处理", game_name);
         }
-        
+
         // 监控登录状态（如果启用）
         if wait_for_login {
             println!("🔐 已启用登录完成检测");
-            match token_monitor::wait_for_login_complete(login_timeout) {
+            match token_monitor::wait_for_login_complete(login_timeout, &game_code) {
                 Ok(true) => {
                     println!("✅ {} 登录完成！", account_name_clone);
                     
@@ -228,26 +247,19 @@ pub fn launch_account(
 pub fn launch_all_accounts(
     app: tauri::AppHandle,
     account_ids: Vec<String>,
-    game_path: String,
     delay_secs: u64,
 ) -> Result<(), String> {
     for (i, id) in account_ids.iter().enumerate() {
         if i > 0 {
             thread::sleep(Duration::from_secs(delay_secs));
         }
-        launch_account(
-            app.clone(),
-            id.clone(),
-            game_path.clone(),
-        )?;
+        launch_account(app.clone(), id.clone(), None)?;
     }
     Ok(())
 }
 
-/// 使用 Handle64.exe 杀掉 D2R 进程的互斥锁句柄，允许多开
-fn kill_d2r_mutex_handle(handle_exe: &str, pid: u32) {
-    let mutex_name = "DiabloII Check For Other Instances";
-
+/// 使用 Handle64.exe 杀掉游戏进程的互斥锁句柄，允许多开
+fn kill_mutex_handle(handle_exe: &str, pid: u32, mutex_name: &str) {
     // 第一步：查询互斥锁的 handle ID（不需要管理员权限）
     let mut cmd = Command::new(handle_exe);
     #[cfg(windows)]
@@ -277,7 +289,7 @@ fn kill_d2r_mutex_handle(handle_exe: &str, pid: u32) {
     // handle ID 在最后一个冒号前面
     let handle_id = stdout
         .lines()
-        .find(|line| line.contains("DiabloII Check For Other Instances"))
+        .find(|line| line.contains(mutex_name))
         .and_then(|line| line.rsplitn(2, ':').last())
         .and_then(|before| before.split_whitespace().next_back());
 

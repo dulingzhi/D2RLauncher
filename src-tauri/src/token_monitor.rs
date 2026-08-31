@@ -10,16 +10,20 @@ use winreg::enums::*;
 use winreg::RegKey;
 
 /// 监控注册表 WEB_TOKEN 变化，等待登录完成
+/// code 为游戏应用代码（"OSI" / "WOW"），决定监控的注册表键
 /// 返回是否成功检测到登录完成
 #[cfg(windows)]
-pub fn wait_for_login_complete(timeout_seconds: u64) -> Result<bool, String> {
-    println!("🔐 开始监控登录状态...");
-    
-    // 打开注册表路径: HKCU\SOFTWARE\Blizzard Entertainment\Battle.net\Launch Options\OSI
+pub fn wait_for_login_complete(timeout_seconds: u64, code: &str) -> Result<bool, String> {
+    println!("🔐 开始监控登录状态（{}）...", code);
+
+    // 打开注册表路径: HKCU\SOFTWARE\Blizzard Entertainment\Battle.net\Launch Options\{code}
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let path = r"SOFTWARE\Blizzard Entertainment\Battle.net\Launch Options\OSI";
+    let path = format!(
+        r"SOFTWARE\Blizzard Entertainment\Battle.net\Launch Options\{}",
+        code
+    );
     
-    let key = match hkcu.open_subkey(path) {
+    let key = match hkcu.open_subkey(&path) {
         Ok(k) => k,
         Err(e) => {
             return Err(format!("⚠️ 无法打开注册表路径: {}", e));
@@ -78,7 +82,7 @@ pub fn wait_for_login_complete(timeout_seconds: u64) -> Result<bool, String> {
 }
 
 #[cfg(not(windows))]
-pub fn wait_for_login_complete(_timeout_seconds: u64) -> Result<bool, String> {
+pub fn wait_for_login_complete(_timeout_seconds: u64, _code: &str) -> Result<bool, String> {
     Err("Token 监控仅支持 Windows 平台".to_string())
 }
 

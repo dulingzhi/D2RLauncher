@@ -173,15 +173,20 @@ impl GameMonitor {
         let mut instances = Vec::new();
         let mappings = pid_mappings.lock().unwrap();
 
-        // 获取所有 D2R 窗口标题（用于显示，但不用于识别）
-        let mut windows_map: std::collections::HashMap<u32, String> =
+        // 只收集已注册游戏进程的窗口标题（进程是权威来源，标题仅辅助过滤，
+        // 避免把标题里恰好含游戏名的资源管理器/浏览器窗口误认为游戏窗口）
+        let registered_pids: std::collections::HashSet<u32> =
+            mappings.keys().copied().collect();
+        let mut windows: std::collections::HashMap<u32, String> =
             std::collections::HashMap::new();
+        let mut ctx = (&mut windows, &registered_pids);
         unsafe {
             let _ = EnumWindows(
                 Some(enum_window_callback),
-                windows::Win32::Foundation::LPARAM(&mut windows_map as *mut _ as isize),
+                windows::Win32::Foundation::LPARAM(&mut ctx as *mut _ as isize),
             );
         }
+        let windows_map = ctx.0;
 
         // 遍历 PID 映射表，检查进程是否仍在运行
         for (pid, (account_id, account_name, region)) in mappings.iter() {
@@ -190,7 +195,7 @@ impl GameMonitor {
                 let window_title = windows_map
                     .get(pid)
                     .cloned()
-                    .unwrap_or_else(|| "Diablo II: Resurrected".to_string());
+                    .unwrap_or_default();
 
                 instances.push(GameInstance {
                     account_id: account_id.clone(),
@@ -223,16 +228,27 @@ impl GameMonitor {
     }
 }
 
+/// 窗口枚举上下文：(PID → 标题收集表, 已注册游戏 PID 集合)
+type EnumCtx<'a> = (
+    &'a mut std::collections::HashMap<u32, String>,
+    &'a std::collections::HashSet<u32>,
+);
+
 // Windows API 回调函数：枚举所有窗口
 unsafe extern "system" fn enum_window_callback(
     hwnd: HWND,
     lparam: windows::Win32::Foundation::LPARAM,
 ) -> windows::Win32::Foundation::BOOL {
-    let map = &mut *(lparam.0 as *mut std::collections::HashMap<u32, String>);
+    let (map, registered_pids) = &mut *(lparam.0 as *mut EnumCtx);
 
     // 获取窗口进程 ID
     let mut process_id: u32 = 0;
     GetWindowThreadProcessId(hwnd, Some(&mut process_id));
+
+    // 只关注本启动器注册的游戏进程的窗口
+    if !registered_pids.contains(&process_id) {
+        return windows::Win32::Foundation::BOOL(1); // 继续枚举
+    }
 
     // 获取窗口标题
     let mut title: [u16; 512] = [0; 512];
@@ -241,9 +257,11 @@ unsafe extern "system" fn enum_window_callback(
     if len > 0 {
         let window_title = String::from_utf16_lossy(&title[..len as usize]);
 
-        // 只记录 D2R 相关窗口
-        if window_title.contains("Diablo II: Resurrected") {
-            println!("🎮 检测到 D2R 窗口 (PID {}): {}", process_id, window_title);
+        // 标题关键字过滤游戏进程自己的辅助窗口；标题变化时才打日志避免刷屏
+        if crate::games::matches_window_title(&window_title)
+            && map.get(&process_id).map(|t| t.as_str()) != Some(window_title.as_str())
+        {
+            println!("🎮 检测到游戏窗口 (PID {}): {}", process_id, window_title);
             map.insert(process_id, window_title);
         }
     }

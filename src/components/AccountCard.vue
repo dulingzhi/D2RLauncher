@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import type { Account } from '../types'
-import { tokenAge } from '../types'
+import { tokenAge, gameInfo, wowFlavorLabel } from '../types'
 import LoginDialog from './LoginDialog.vue'
 import { useToast } from '../composables/useToast'
 
@@ -68,6 +68,10 @@ async function launch() {
 const hasToken = computed(() => !!props.account.encrypted_token)
 const tokenInfo = computed(() => tokenAge(props.account.token_set_at))
 const isRunning = computed(() => !!props.runningGame)
+const game = computed(() => gameInfo(props.account.game))
+const flavorText = computed(() =>
+  props.account.game === 'wow' ? wowFlavorLabel(props.account.flavor) : '',
+)
 
 const runningDuration = computed(() => {
   if (!props.runningGame) return ''
@@ -93,6 +97,7 @@ function killProcess() {
       <div class="account-info">
         <span class="account-label">
           {{ account.label }}
+          <span class="game-badge">{{ game.icon }} {{ game.short }}<template v-if="flavorText"> · {{ flavorText }}</template></span>
           <span v-if="isRunning" class="running-badge">运行中</span>
         </span>
         <span class="account-sub">
@@ -136,6 +141,7 @@ function killProcess() {
   <LoginDialog
     :visible="showLoginDialog"
     :account-id="account.id"
+    :game="account.game || 'osic'"
     @token-captured="handleTokenCaptured"
     @cancel="handleLoginCancel"
   />
@@ -208,6 +214,16 @@ function killProcess() {
   background: rgba(74, 222, 128, 0.15);
   color: #4ade80;
   font-weight: 500;
+}
+
+.game-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(100, 116, 139, 0.12);
+  color: #94a3b8;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .account-sub {

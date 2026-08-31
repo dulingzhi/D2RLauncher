@@ -149,9 +149,16 @@ pub async fn open_login_with_server(app: AppHandle, account_id: String) -> Resul
 }
 
 /// 打开 Battle.net 登录页面，并自动监听 URL 变化捕获 token
+/// game 为账号所属游戏 uid（"osic" / "wow"），决定登录页的 app= 参数
 #[tauri::command]
-pub async fn open_login_with_navigation(app: AppHandle, account_id: String) -> Result<(), String> {
-    let login_url = "https://account.battlenet.com.cn/login/zh/?externalChallenge=login&app=OSI";
+pub async fn open_login_with_navigation(
+    app: AppHandle,
+    account_id: String,
+    game: Option<String>,
+) -> Result<(), String> {
+    let cfg = crate::games::get_game(&game.unwrap_or_else(|| "osic".to_string()))
+        .ok_or_else(|| "不支持的游戏 uid".to_string())?;
+    let login_url = cfg.login_url();
     
     let account_id_for_nav = account_id.clone();
     let account_id_for_close = account_id.clone();

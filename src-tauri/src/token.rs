@@ -147,18 +147,20 @@ pub fn dpapi_decrypt_token(encrypted: &[u8]) -> Result<String, String> {
     }
 }
 
-/// 将 token 加密后写入注册表，供 D2R.exe 读取
+/// 将 token 加密后写入对应游戏的注册表键
+/// uid 见 games::get_game（"osic" / "wow"）
 #[tauri::command]
-pub fn write_token_to_registry(plain_token: String) -> Result<(), String> {
+pub fn write_token_to_registry(plain_token: String, game: String) -> Result<(), String> {
     #[cfg(windows)]
     {
         use winreg::{enums::*, RegKey};
 
+        let cfg = crate::games::get_game(&game)
+            .ok_or_else(|| format!("不支持的游戏 uid: {}", game))?;
         let protected = dpapi_encrypt_token(&plain_token)?;
 
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-        let reg_path = r"SOFTWARE\Blizzard Entertainment\Battle.net\Launch Options\OSI";
-        let (key, _) = hkcu.create_subkey(reg_path).map_err(|e| e.to_string())?;
+        let (key, _) = hkcu.create_subkey(cfg.registry_path()).map_err(|e| e.to_string())?;
 
         key.set_value("REGION", &"CN").map_err(|e| e.to_string())?;
         key.set_raw_value(
@@ -174,22 +176,29 @@ pub fn write_token_to_registry(plain_token: String) -> Result<(), String> {
     }
     #[cfg(not(windows))]
     {
+        let _ = game;
         Err("Registry operations are only available on Windows".to_string())
     }
 }
 
 /// 打开登录窗口，拦截 localhost:0 回调并提取 ST token
 #[tauri::command]
-pub fn open_login_window(app: tauri::AppHandle, account_id: String) -> Result<(), String> {
+pub fn open_login_window(
+    app: tauri::AppHandle,
+    account_id: String,
+    game: Option<String>,
+) -> Result<(), String> {
     use tauri::{Emitter, Manager, WebviewWindowBuilder, WebviewUrl};
-    
+
     // 如果已有登录窗口则关闭旧的
     if let Some(win) = app.get_webview_window("login") {
         let _ = win.close();
         std::thread::sleep(std::time::Duration::from_millis(200));
     }
 
-    let login_url = "https://account.battlenet.com.cn/login/zh/?externalChallenge=login&app=OSI";
+    let cfg = crate::games::get_game(&game.unwrap_or_else(|| "osic".to_string()))
+        .ok_or_else(|| "不支持的游戏 uid".to_string())?;
+    let login_url = cfg.login_url();
     let app_clone = app.clone();
     let aid = account_id.clone();
 
