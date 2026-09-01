@@ -81,7 +81,7 @@ pub fn launch_account(
         }
     }
 
-    for arg in cfg.launch_args {
+    for arg in cfg.launch_args(&flavor) {
         args.push(arg.to_string());
     }
 

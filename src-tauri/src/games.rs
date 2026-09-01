@@ -11,14 +11,12 @@ pub const FLAVOR_TITAN: &str = "titan";
 pub const FLAVOR_ANNIVERSARY: &str = "anniversary";
 
 pub struct GameConfig {
-    /// 启动参数 -uid 的值，如 "osic" / "wow"
+    /// 游戏唯一标识（设置项与注册表写入用），如 "osic" / "wow"
     pub uid: &'static str,
     /// Battle.net 应用代码：登录 URL 的 app= 与注册表键名，如 "OSI" / "WOW"
     pub code: &'static str,
     /// 界面显示名
     pub display_name: &'static str,
-    /// 启动参数（自定义参数之后追加）
-    pub launch_args: &'static [&'static str],
     /// 多开互斥锁名（D2R 专有，WOW 为 None）
     pub mutex_name: Option<&'static str>,
     /// 游戏窗口标题识别关键字
@@ -34,7 +32,6 @@ static GAMES: &[GameConfig] = &[
         uid: "osic",
         code: "OSI",
         display_name: "暗黑破坏神2：狱火重生",
-        launch_args: &["-uid", "osic"],
         mutex_name: Some("DiabloII Check For Other Instances"),
         window_title_keyword: "Diablo II: Resurrected",
     },
@@ -42,11 +39,23 @@ static GAMES: &[GameConfig] = &[
         uid: "wow",
         code: "WOW",
         display_name: "魔兽世界",
-        launch_args: &["-launcherlogin", "-uid", "wow"],
         mutex_name: None,
         window_title_keyword: "World of Warcraft",
     },
 ];
+
+/// WoW 分支 → 启动参数 -uid 的值（Battle.net agent uid）
+/// 正式服为 wow，怀旧类分支各不相同，传错会登录到错误分支
+fn wow_launch_uid(flavor: &str) -> &'static str {
+    match flavor {
+        FLAVOR_ANNIVERSARY => "wow_classic_anniversary",
+        FLAVOR_CLASSIC => "wow_classic",
+        FLAVOR_CLASSIC_ERA => "wow_classic_era",
+        FLAVOR_TITAN => "wow_classic_titan",
+        // 默认正式服
+        _ => "wow",
+    }
+}
 
 pub fn get_game(uid: &str) -> Option<&'static GameConfig> {
     GAMES.iter().find(|g| g.uid == uid)
@@ -73,6 +82,16 @@ impl GameConfig {
     /// 关键字必须保留，否则改名后窗口不再被 matches_window_title 识别
     pub fn window_title_for(&self, account_label: &str) -> String {
         format!("{} - {}", account_label, self.window_title_keyword)
+    }
+
+    /// 启动参数（自定义参数之后追加）
+    /// WoW 的 -uid 按分支区分，见 wow_launch_uid
+    pub fn launch_args(&self, flavor: &str) -> Vec<&'static str> {
+        match self.uid {
+            "osic" => vec!["-uid", "osic"],
+            "wow" => vec!["-launcherlogin", "-uid", wow_launch_uid(flavor)],
+            _ => vec![],
+        }
     }
 
     /// 相对安装根目录的候选 exe（按优先级）
@@ -180,7 +199,7 @@ mod tests {
     fn d2r_config_uses_osi_code() {
         let g = get_game("osic").expect("osic 应已注册");
         assert_eq!(g.code, "OSI");
-        assert_eq!(g.launch_args, &["-uid", "osic"]);
+        assert_eq!(g.launch_args(FLAVOR_RETAIL), vec!["-uid", "osic"]);
         assert_eq!(g.mutex_name, Some("DiabloII Check For Other Instances"));
     }
 
@@ -188,8 +207,30 @@ mod tests {
     fn wow_config_uses_wow_code_and_launcherlogin() {
         let g = get_game("wow").expect("wow 应已注册");
         assert_eq!(g.code, "WOW");
-        assert_eq!(g.launch_args, &["-launcherlogin", "-uid", "wow"]);
+        assert_eq!(g.launch_args(FLAVOR_RETAIL), vec!["-launcherlogin", "-uid", "wow"]);
         assert_eq!(g.mutex_name, None);
+    }
+
+    #[test]
+    fn wow_launch_uid_varies_by_flavor() {
+        // 回归：各分支 -uid 传错会登录到错误分支
+        let g = get_game("wow").unwrap();
+        assert_eq!(
+            g.launch_args(FLAVOR_CLASSIC),
+            vec!["-launcherlogin", "-uid", "wow_classic"]
+        );
+        assert_eq!(
+            g.launch_args(FLAVOR_CLASSIC_ERA),
+            vec!["-launcherlogin", "-uid", "wow_classic_era"]
+        );
+        assert_eq!(
+            g.launch_args(FLAVOR_TITAN),
+            vec!["-launcherlogin", "-uid", "wow_classic_titan"]
+        );
+        assert_eq!(
+            g.launch_args(FLAVOR_ANNIVERSARY),
+            vec!["-launcherlogin", "-uid", "wow_classic_anniversary"]
+        );
     }
 
     #[test]
