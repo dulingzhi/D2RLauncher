@@ -215,20 +215,26 @@ fn default_backup_flavor() -> String {
     "retail".to_string()
 }
 
-/// 导出全部账号（含认证 token）到密码加密的备份文件
+/// 导出账号（含认证 token）到密码加密的备份文件
+/// account_ids 为 Some 时只导出所选账号，None 导出全部
 #[tauri::command]
 pub fn export_accounts(
     app: tauri::AppHandle,
     path: String,
     password: String,
+    account_ids: Option<Vec<String>>,
 ) -> Result<usize, String> {
-    let accounts = crate::accounts::load_accounts(&app);
-    if accounts.is_empty() {
+    let all = crate::accounts::load_accounts(&app);
+    let selected: Vec<&Account> = match &account_ids {
+        Some(ids) => all.iter().filter(|a| ids.contains(&a.id)).collect(),
+        None => all.iter().collect(),
+    };
+    if selected.is_empty() {
         return Err("没有账号可导出".to_string());
     }
 
-    let mut backup_accounts = Vec::with_capacity(accounts.len());
-    for acc in &accounts {
+    let mut backup_accounts = Vec::with_capacity(selected.len());
+    for acc in &selected {
         // DPAPI 与当前 Windows 用户/机器绑定，必须先解密成明文才能跨机器迁移
         let plain_token = match &acc.encrypted_token {
             Some(encoded) => {
@@ -262,7 +268,7 @@ pub fn export_accounts(
     let json = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
     let envelope = encrypt_payload(&json, &password);
     std::fs::write(&path, envelope).map_err(|e| format!("写入备份文件失败: {}", e))?;
-    Ok(accounts.len())
+    Ok(selected.len())
 }
 
 /// 从密码加密的备份文件导入账号，token 在本机重新 DPAPI 加密

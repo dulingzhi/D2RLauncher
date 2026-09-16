@@ -21,6 +21,10 @@ interface GameInstance {
 const props = defineProps<{
   account: Account
   runningGame?: GameInstance
+  /** 列表编辑模式：显示复选框/拖动手柄，隐藏操作按钮 */
+  editMode?: boolean
+  /** 编辑模式下是否被选中 */
+  selected?: boolean
 }>()
 const emit = defineEmits<{
   refresh: []
@@ -28,7 +32,14 @@ const emit = defineEmits<{
   delete: [id: string]
   launch: [account: Account]
   kill: [processId: number, accountName: string]
+  select: []
+  'drag-handle-down': [e: PointerEvent]
 }>()
+
+/** 编辑模式下点击卡片任意位置切换选中 */
+function onRowClick() {
+  if (props.editMode) emit('select')
+}
 
 const launching = ref(false)
 const gettingToken = ref(false)
@@ -90,8 +101,33 @@ function killProcess() {
 </script>
 
 <template>
-  <div class="account-card" :class="{ 'has-token': hasToken, 'is-running': isRunning }">
+  <div
+    class="account-card"
+    :class="{
+      'has-token': hasToken,
+      'is-running': isRunning,
+      'edit-mode': editMode,
+      selected: editMode && selected,
+    }"
+    @click="onRowClick"
+  >
     <div class="account-row">
+      <!-- 编辑模式：拖动手柄 + 复选框 -->
+      <template v-if="editMode">
+        <span
+          class="drag-handle"
+          title="按住拖动排序"
+          @pointerdown.stop="emit('drag-handle-down', $event)"
+          @click.stop
+        >⠿</span>
+        <input
+          type="checkbox"
+          class="select-checkbox"
+          :checked="selected"
+          @click.stop
+          @change="emit('select')"
+        />
+      </template>
       <!-- 状态指示 + 名称 -->
       <div class="account-status-dot" :class="isRunning ? 'running' : (hasToken ? 'online' : 'offline')" />
       <div class="account-info">
@@ -108,8 +144,8 @@ function killProcess() {
         </span>
       </div>
 
-      <!-- 操作按钮 -->
-      <div class="account-actions">
+      <!-- 操作按钮（编辑模式下隐藏，改为整卡多选） -->
+      <div v-if="!editMode" class="account-actions">
         <button
           v-if="!isRunning"
           class="btn btn-primary btn-sm"
@@ -158,6 +194,39 @@ function killProcess() {
 }
 
 .account-card.has-token { border-color: #3d4f7c; }
+
+/* ========== 编辑模式 ========== */
+.account-card.edit-mode { cursor: pointer; }
+
+.account-card.selected {
+  border-color: #3b82f6;
+  background: #1a2340;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.18);
+}
+
+.account-card.edit-mode:not(.selected):hover {
+  border-color: #3d4f7c;
+  background: #22253a;
+}
+
+.drag-handle {
+  color: #64748b;
+  font-size: 15px;
+  flex-shrink: 0;
+  cursor: grab;
+  line-height: 1;
+  padding: 2px;
+}
+
+.drag-handle:hover { color: #94a3b8; }
+
+.select-checkbox {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  accent-color: #3b82f6;
+  flex-shrink: 0;
+}
 
 .account-card.is-running {
   background: #1e2f1e;

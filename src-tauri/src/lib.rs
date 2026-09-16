@@ -34,6 +34,8 @@ pub fn run() {
             accounts::add_account,
             accounts::update_account,
             accounts::delete_account,
+            accounts::delete_accounts,
+            accounts::reorder_accounts,
             accounts::save_token_for_account,
             accounts::batch_update_account_windows,
             accounts::reset_account_windows,

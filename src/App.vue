@@ -3,12 +3,14 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getVersion } from '@tauri-apps/api/app'
+import { save as saveFileDialog } from '@tauri-apps/plugin-dialog'
 import AccountCard from './components/AccountCard.vue'
 import AccountModal from './components/AccountModal.vue'
 import SettingsModal from './components/SettingsModal.vue'
 import ToastContainer from './components/ToastContainer.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
 import FlavorSelectDialog from './components/FlavorSelectDialog.vue'
+import BackupPasswordDialog from './components/BackupPasswordDialog.vue'
 import { useToast } from './composables/useToast'
 import type { Account } from './types'
 import { gameInfo } from './types'
@@ -43,6 +45,146 @@ const waitingForLogin = ref<{ accountId: string; accountName: string } | null>(n
 const flavorDialog = ref<{ account: Account; flavors: string[] } | null>(null)
 
 const confirmRef = ref<InstanceType<typeof ConfirmDialog> | null>(null)
+const backupDialog = ref<InstanceType<typeof BackupPasswordDialog> | null>(null)
+
+/* ========== 列表编辑模式：多选 + 批量删除/导出 + 拖动排序 ========== */
+const editMode = ref(false)
+const selectedIds = ref<Set<string>>(new Set())
+/** 拖动排序：被拖账号 id / 插入位置（在当前数组中「插到此索引之前」） */
+const dragId = ref<string | null>(null)
+const dropBeforeIndex = ref(-1)
+const mainRef = ref<HTMLElement | null>(null)
+
+const selectedCount = computed(() => selectedIds.value.size)
+const allSelected = computed(
+  () => accounts.value.length > 0 && accounts.value.every((a) => selectedIds.value.has(a.id)),
+)
+
+function toggleEditMode() {
+  editMode.value = !editMode.value
+  selectedIds.value = new Set()
+  dragId.value = null
+  dropBeforeIndex.value = -1
+}
+
+function toggleSelect(id: string) {
+  const next = new Set(selectedIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selectedIds.value = next
+}
+
+function toggleSelectAll() {
+  if (allSelected.value) {
+    selectedIds.value = new Set()
+  } else {
+    selectedIds.value = new Set(accounts.value.map((a) => a.id))
+  }
+}
+
+/* ---- 指针拖动排序（WebView2 下 HTML5 DnD 光标/落点不可靠，改用 pointer events） ---- */
+
+function onHandleDown(index: number, e: PointerEvent) {
+  if (!editMode.value) return
+  e.preventDefault()
+  dragId.value = accounts.value[index]?.id ?? null
+  if (dragId.value === null) return
+  dropBeforeIndex.value = index
+  window.addEventListener('pointermove', onDragMove)
+  window.addEventListener('pointerup', onDragEnd, { once: true })
+}
+
+function onDragMove(e: PointerEvent) {
+  const main = mainRef.value
+  if (!main || dragId.value === null) return
+
+  // 靠近列表视口边缘时自动滚动
+  const r = main.getBoundingClientRect()
+  if (e.clientY < r.top + 24) main.scrollTop -= 10
+  else if (e.clientY > r.bottom - 24) main.scrollTop += 10
+
+  const wraps = Array.from(main.querySelectorAll<HTMLElement>('.card-wrap'))
+  for (let i = 0; i < wraps.length; i++) {
+    const rect = wraps[i].getBoundingClientRect()
+    if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
+      const mid = rect.top + rect.height / 2
+      dropBeforeIndex.value = e.clientY < mid ? i : i + 1
+      return
+    }
+  }
+  // 指针在卡片区外：偏上放最前，偏下放最后
+  dropBeforeIndex.value =
+    wraps.length > 0 && e.clientY < wraps[0].getBoundingClientRect().top ? 0 : wraps.length
+}
+
+async function onDragEnd() {
+  window.removeEventListener('pointermove', onDragMove)
+  const id = dragId.value
+  const to = dropBeforeIndex.value
+  dragId.value = null
+  dropBeforeIndex.value = -1
+  if (id === null || to < 0) return
+
+  const list = [...accounts.value]
+  const from = list.findIndex((a) => a.id === id)
+  if (from < 0) return
+  // 目标位置指向被拖元素自身或其紧后位置 → 顺序不变
+  if (to === from || to === from + 1) return
+
+  const [moved] = list.splice(from, 1)
+  list.splice(to > from ? to - 1 : to, 0, moved)
+  accounts.value = list
+
+  try {
+    await invoke('reorder_accounts', { ids: list.map((a) => a.id) })
+  } catch (e) {
+    toastError(`保存顺序失败: ${e}`)
+  }
+}
+
+async function handleBatchDelete() {
+  if (!selectedCount.value) return
+  const ok = await confirmRef.value?.confirm({
+    title: '删除账号',
+    message: `确认删除选中的 ${selectedCount.value} 个账号？此操作不可撤销。`,
+    confirmText: '删除',
+    danger: true,
+  })
+  if (!ok) return
+  try {
+    const removed = await invoke<number>('delete_accounts', { ids: [...selectedIds.value] })
+    success(`已删除 ${removed} 个账号`)
+    selectedIds.value = new Set()
+    await loadAccounts()
+  } catch (e) {
+    toastError(`删除失败: ${e}`)
+  }
+}
+
+async function handleBatchExport() {
+  if (!selectedCount.value) return
+  const result = await backupDialog.value?.open('export')
+  if (!result) return
+
+  try {
+    const defaultName = `d2r-backup-${new Date().toISOString().slice(0, 10)}.json`
+    const path = await saveFileDialog({
+      title: '导出账号备份',
+      defaultPath: defaultName,
+      filters: [{ name: '加密备份文件', extensions: ['json'] }],
+    })
+    if (!path) return
+
+    const count = await invoke<number>('export_accounts', {
+      path,
+      password: result.password,
+      accountIds: [...selectedIds.value],
+    })
+    success(`✅ 已导出 ${count} 个账号到加密备份`)
+  } catch (e) {
+    toastError(`导出失败: ${e}`)
+  }
+}
 
 let unlistenGameStatus: UnlistenFn | null = null
 let unlistenLoginComplete: UnlistenFn | null = null
@@ -425,24 +567,51 @@ const readyCount = () => accounts.value.filter((a) => a.encrypted_token).length
     </header>
 
     <!-- 主内容区 -->
-    <main class="main-content">
+    <main class="main-content" ref="mainRef">
       <!-- 操作栏 -->
       <div class="toolbar">
         <div class="toolbar-left">
-          <span class="toolbar-meta">
+          <span v-if="editMode" class="toolbar-meta">
+            已选 <strong>{{ selectedCount }}</strong> / 共 {{ accounts.length }} 个，
+            <span class="text-blue">按住 ⠿ 手柄可拖动排序</span>
+          </span>
+          <span v-else class="toolbar-meta">
             共 <strong>{{ accounts.length }}</strong> 个账号，
             <span class="text-green">{{ readyCount() }} 个已配置</span>
           </span>
         </div>
         <div class="toolbar-right">
-          <button class="btn btn-secondary" @click="openAddModal">+ 添加</button>
-          <button
-            class="btn btn-primary"
-            :disabled="batchLaunching || readyCount() === 0"
-            @click="launchAll"
-          >
-            {{ batchLaunching ? '启动中...' : '🚀 全部启动' }}
-          </button>
+          <template v-if="editMode">
+            <button class="btn btn-secondary" @click="toggleSelectAll">
+              {{ allSelected ? '取消全选' : '全选' }}
+            </button>
+            <button
+              class="btn btn-danger"
+              :disabled="selectedCount === 0"
+              @click="handleBatchDelete"
+            >
+              🗑️ 删除{{ selectedCount > 0 ? ` (${selectedCount})` : '' }}
+            </button>
+            <button
+              class="btn btn-secondary"
+              :disabled="selectedCount === 0"
+              @click="handleBatchExport"
+            >
+              📤 导出{{ selectedCount > 0 ? ` (${selectedCount})` : '' }}
+            </button>
+            <button class="btn btn-primary" @click="toggleEditMode">✔️ 完成</button>
+          </template>
+          <template v-else>
+            <button class="btn btn-secondary" @click="openAddModal">+ 添加</button>
+            <button class="btn btn-secondary" @click="toggleEditMode">✏️ 管理</button>
+            <button
+              class="btn btn-primary"
+              :disabled="batchLaunching || readyCount() === 0"
+              @click="launchAll"
+            >
+              {{ batchLaunching ? '启动中...' : '🚀 全部启动' }}
+            </button>
+          </template>
         </div>
       </div>
 
@@ -453,18 +622,34 @@ const readyCount = () => accounts.value.filter((a) => a.encrypted_token).length
         <p class="empty-hint">点击「+ 添加」开始</p>
       </div>
 
-      <!-- 账号卡片列表 -->
-      <AccountCard
-        v-for="account in accounts"
+      <!-- 账号卡片列表（编辑模式下按住手柄拖动排序） -->
+      <div
+        v-for="(account, index) in accounts"
         :key="account.id"
-        :account="account"
-        :running-game="runningGames.get(account.id)"
-        @refresh="loadAccounts"
-        @edit="openEditModal"
-        @delete="handleDelete"
-        @launch="handleLaunchAccount"
-        @kill="handleKillProcess"
-      />
+        class="card-wrap"
+        :class="{
+          dragging: dragId === account.id,
+          'insert-before': dropBeforeIndex === index && dragId !== account.id,
+          'insert-after':
+            dropBeforeIndex === index + 1 &&
+            index === accounts.length - 1 &&
+            dragId !== account.id,
+        }"
+      >
+        <AccountCard
+          :account="account"
+          :running-game="runningGames.get(account.id)"
+          :edit-mode="editMode"
+          :selected="selectedIds.has(account.id)"
+          @refresh="loadAccounts"
+          @edit="openEditModal"
+          @delete="handleDelete"
+          @launch="handleLaunchAccount"
+          @kill="handleKillProcess"
+          @select="toggleSelect(account.id)"
+          @drag-handle-down="onHandleDown(index, $event)"
+        />
+      </div>
     </main>
 
     <!-- 添加/编辑弹窗 -->
@@ -512,6 +697,9 @@ const readyCount = () => accounts.value.filter((a) => a.encrypted_token).length
 
     <!-- 全局确认弹窗 -->
     <ConfirmDialog ref="confirmRef" />
+
+    <!-- 批量导出密码弹窗 -->
+    <BackupPasswordDialog ref="backupDialog" />
   </div>
 </template>
 
@@ -621,8 +809,42 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 }
 
 .text-green { color: #86efac; }
+.text-blue { color: #60a5fa; }
 
 .toolbar-right { display: flex; gap: 6px; }
+
+.btn-danger {
+  background: transparent;
+  color: #f87171;
+  border: 1px solid #7f1d1d;
+}
+
+.btn-danger:not(:disabled):hover {
+  background: rgba(220, 38, 38, 0.15);
+  border-color: #ef4444;
+}
+
+.btn-danger:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ========== 卡片拖拽排序 ========== */
+.card-wrap { position: relative; }
+
+.card-wrap.dragging { opacity: 0.35; }
+
+.card-wrap.insert-before::before,
+.card-wrap.insert-after::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #3b82f6;
+  border-radius: 1px;
+  pointer-events: none;
+}
+
+.card-wrap.insert-before::before { top: -4px; }
+.card-wrap.insert-after::after { bottom: -4px; }
 
 /* ========== 按钮 ========== */
 .btn {

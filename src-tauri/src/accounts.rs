@@ -95,6 +95,37 @@ pub fn delete_account(app: tauri::AppHandle, id: String) -> Result<(), String> {
     Ok(())
 }
 
+/// 批量删除账号
+#[tauri::command]
+pub fn delete_accounts(app: tauri::AppHandle, ids: Vec<String>) -> Result<usize, String> {
+    let mut accounts = load_accounts(&app);
+    let before = accounts.len();
+    accounts.retain(|a| !ids.contains(&a.id));
+    let removed = before - accounts.len();
+    save_accounts(&app, &accounts)?;
+    Ok(removed)
+}
+
+/// 按给定 id 顺序重排（纯函数，便于测试）：未提及的账号保持原有相对顺序，排在末尾
+fn reorder_by_ids(accounts: Vec<Account>, ids: &[String]) -> Vec<Account> {
+    let mut rest = accounts;
+    let mut ordered: Vec<Account> = Vec::with_capacity(rest.len());
+    for id in ids {
+        if let Some(pos) = rest.iter().position(|a| &a.id == id) {
+            ordered.push(rest.remove(pos));
+        }
+    }
+    ordered.append(&mut rest);
+    ordered
+}
+
+/// 按给定 id 顺序重排账号列表
+#[tauri::command]
+pub fn reorder_accounts(app: tauri::AppHandle, ids: Vec<String>) -> Result<(), String> {
+    let accounts = reorder_by_ids(load_accounts(&app), &ids);
+    save_accounts(&app, &accounts)
+}
+
 /// 将捕获到的明文 token 加密后保存到账号
 #[tauri::command]
 pub fn save_token_for_account(
@@ -231,4 +262,52 @@ pub fn reset_account_windows(
 
     save_accounts(&app, &accounts)?;
     Ok(updated_count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn acc(id: &str) -> Account {
+        Account {
+            id: id.to_string(),
+            label: id.to_string(),
+            encrypted_token: None,
+            token_set_at: None,
+            game: "osic".to_string(),
+            flavor: "retail".to_string(),
+            custom_args: String::new(),
+            window_x: None,
+            window_y: None,
+            window_width: None,
+            window_height: None,
+        }
+    }
+
+    #[test]
+    fn reorder_moves_selected_to_front_in_given_order() {
+        let accounts = vec![acc("a"), acc("b"), acc("c"), acc("d")];
+        let ids = vec!["d".to_string(), "b".to_string()];
+        let out = reorder_by_ids(accounts, &ids);
+        let ids: Vec<&str> = out.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, vec!["d", "b", "a", "c"]);
+    }
+
+    #[test]
+    fn reorder_ignores_unknown_ids_and_keeps_unmentioned_tail() {
+        let accounts = vec![acc("a"), acc("b"), acc("c")];
+        let ids = vec!["x".to_string(), "c".to_string()];
+        let out = reorder_by_ids(accounts, &ids);
+        let ids: Vec<&str> = out.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, vec!["c", "a", "b"]);
+    }
+
+    #[test]
+    fn reorder_full_list_respects_order() {
+        let accounts = vec![acc("a"), acc("b"), acc("c")];
+        let ids = vec!["c".to_string(), "a".to_string(), "b".to_string()];
+        let out = reorder_by_ids(accounts, &ids);
+        let ids: Vec<&str> = out.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, vec!["c", "a", "b"]);
+    }
 }
