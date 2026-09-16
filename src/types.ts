@@ -4,7 +4,7 @@ export interface Account {
   label: string
   encrypted_token: string | null
   token_set_at: number | null  // Unix timestamp (seconds)
-  /** 所属游戏 uid：osic(D2R) / wow，见后端 games.rs */
+  /** 所属游戏 uid：osic(D2R) / wow / w3，见后端 games.rs */
   game: string
   /** WoW 分支：retail / classic / classic_era（仅 wow 使用） */
   flavor: string
@@ -33,6 +33,7 @@ export interface Settings {
 export const GAME_OPTIONS = [
   { uid: 'osic', label: '暗黑破坏神2：狱火重生', short: 'D2R', icon: '🔥' },
   { uid: 'wow', label: '魔兽世界', short: 'WoW', icon: '🐺' },
+  { uid: 'w3', label: '魔兽争霸III：重制版', short: 'War3', icon: '⚔️' },
 ] as const
 
 /** WoW 分支定义 */

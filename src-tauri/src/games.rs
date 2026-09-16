@@ -11,7 +11,7 @@ pub const FLAVOR_TITAN: &str = "titan";
 pub const FLAVOR_ANNIVERSARY: &str = "anniversary";
 
 pub struct GameConfig {
-    /// 游戏唯一标识（设置项与注册表写入用），如 "osic" / "wow"
+    /// 游戏唯一标识（设置项与注册表写入用），如 "osic" / "wow" / "w3"
     pub uid: &'static str,
     /// Battle.net 应用代码：登录 URL 的 app= 与注册表键名，如 "OSI" / "WOW"
     pub code: &'static str,
@@ -41,6 +41,13 @@ static GAMES: &[GameConfig] = &[
         display_name: "魔兽世界",
         mutex_name: None,
         window_title_keyword: "World of Warcraft",
+    },
+    GameConfig {
+        uid: "w3",
+        code: "W3",
+        display_name: "魔兽争霸III：重制版",
+        mutex_name: None,
+        window_title_keyword: "Warcraft III",
     },
 ];
 
@@ -99,6 +106,7 @@ impl GameConfig {
         match self.uid {
             "osic" => vec!["-uid", "osic"],
             "wow" => vec!["-launcherlogin", "-uid", wow_launch_uid(flavor)],
+            "w3" => vec!["-launcherlogin", "-uid", "w3"],
             _ => vec![],
         }
     }
@@ -117,6 +125,12 @@ impl GameConfig {
                 // 默认正式服
                 _ => vec![PathBuf::from(r"_retail_\Wow.exe")],
             },
+            // 重制版 exe 在安装根目录，部分版本位于 x86_64 子目录
+            "w3" => vec![
+                PathBuf::from("Warcraft III.exe"),
+                PathBuf::from(r"x86_64\Warcraft III.exe"),
+                PathBuf::from(r"_retail_\x86_64\Warcraft III.exe"),
+            ],
             _ => vec![],
         }
     }
@@ -218,6 +232,32 @@ mod tests {
         assert_eq!(g.code, "WOW");
         assert_eq!(g.launch_args(FLAVOR_RETAIL), vec!["-launcherlogin", "-uid", "wow"]);
         assert_eq!(g.mutex_name, None);
+    }
+
+    #[test]
+    fn w3_config_uses_w3_code_and_uid() {
+        let g = get_game("w3").expect("w3 应已注册");
+        assert_eq!(g.code, "W3");
+        assert_eq!(g.launch_args(FLAVOR_RETAIL), vec!["-uid", "w3"]);
+        assert_eq!(g.mutex_name, None);
+        assert!(g.flavors().is_empty());
+    }
+
+    #[test]
+    fn resolve_exe_finds_w3_in_root_then_x86_64() {
+        let root = temp_install("w3-root", &["Warcraft III.exe"]);
+        let exe = get_game("w3")
+            .unwrap()
+            .resolve_exe(&root.to_string_lossy(), FLAVOR_RETAIL)
+            .expect("应找到根目录 exe");
+        assert!(exe.ends_with("Warcraft III.exe"));
+
+        let root = temp_install("w3-x64", &[r"x86_64\Warcraft III.exe"]);
+        let exe = get_game("w3")
+            .unwrap()
+            .resolve_exe(&root.to_string_lossy(), FLAVOR_RETAIL)
+            .expect("应找到 x86_64 子目录 exe");
+        assert!(exe.ends_with(r"x86_64\Warcraft III.exe"));
     }
 
     #[test]
@@ -336,6 +376,7 @@ mod tests {
         assert!(matches_window_title("Diablo II: Resurrected"));
         assert!(matches_window_title("World of Warcraft"));
         assert!(matches_window_title("World of Warcraft Classic"));
+        assert!(matches_window_title("Warcraft III"));
         assert!(!matches_window_title("记事本"));
         assert!(!matches_window_title(""));
     }

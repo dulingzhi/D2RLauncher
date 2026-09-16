@@ -115,6 +115,33 @@ function clearWowPath() {
   wowPath.value = ''
 }
 
+const w3Path = computed({
+  get: () => settings.value.game_paths?.w3 ?? '',
+  set: (v: string) => {
+    if (!settings.value.game_paths) settings.value.game_paths = {}
+    settings.value.game_paths.w3 = v
+  },
+})
+
+async function browseW3Path() {
+  try {
+    const selected = await open({
+      title: '选择魔兽争霸III安装根目录（含 Warcraft III.exe 的目录）',
+      multiple: false,
+      directory: true,
+    })
+    if (selected && typeof selected === 'string') {
+      w3Path.value = selected
+    }
+  } catch (e) {
+    console.error('选择目录失败:', e)
+  }
+}
+
+function clearW3Path() {
+  w3Path.value = ''
+}
+
 function toggleSelectAll() {
   if (selectedIds.value.length === accounts.value.length) {
     selectedIds.value = []
@@ -270,6 +297,19 @@ async function handleImport() {
                   <button class="btn btn-ghost" @click="clearWowPath" type="button">✕</button>
                 </div>
                 <p class="hint">按账号分支自动查找 _retail_\Wow.exe、_classic_\WowClassic.exe、_classic_era_\WowClassic.exe、_classic_titan_\WowClassic.exe 或 _anniversary_\WowClassic.exe</p>
+              </div>
+              <div class="field">
+                <label>魔兽争霸III安装根目录</label>
+                <div class="input-with-buttons">
+                  <input
+                    v-model="w3Path"
+                    type="text"
+                    placeholder="如：C:\Program Files (x86)\Battle.net\Games\Warcraft III"
+                  />
+                  <button class="btn btn-secondary" @click="browseW3Path" type="button">📁 浏览</button>
+                  <button class="btn btn-ghost" @click="clearW3Path" type="button">✕</button>
+                </div>
+                <p class="hint">在此目录下查找 Warcraft III.exe（或 x86_64\Warcraft III.exe）并启动</p>
                 <p class="hint success">✅ Handle64.exe 已内置，无需单独配置</p>
               </div>
             </div>
