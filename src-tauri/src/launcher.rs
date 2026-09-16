@@ -59,7 +59,7 @@ pub fn launch_account(
         .map_err(|e| format!("base64 decode failed: {}", e))?;
 
         let plain_token = dpapi_decrypt_token(&encrypted)?;
-        write_token_to_registry(plain_token, cfg.uid.to_string())?;
+        write_token_to_registry(plain_token, cfg.uid.to_string(), account.region.clone())?;
     } else {
         return Err("此账号尚未设置 Token，请先获取 Token".to_string());
     }
@@ -98,7 +98,7 @@ pub fn launch_account(
     // 立即注册 PID 到 game_monitor（不需要等待窗口初始化）
     if let Some(monitor) = app.try_state::<Arc<Mutex<crate::game_monitor::GameMonitor>>>() {
         if let Ok(mon) = monitor.lock() {
-            mon.register_game_process(pid, account.id.clone(), account.label.clone(), "cn".to_string());
+            mon.register_game_process(pid, account.id.clone(), account.label.clone(), account.region.to_lowercase());
         }
     } else {
         eprintln!("⚠️ 无法获取 game_monitor 锁，PID 注册失败");

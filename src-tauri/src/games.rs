@@ -62,12 +62,21 @@ pub fn get_game(uid: &str) -> Option<&'static GameConfig> {
 }
 
 impl GameConfig {
-    /// 登录页 URL（externalChallenge，token 捕获用）
-    pub fn login_url(&self) -> String {
-        format!(
-            "https://account.battlenet.com.cn/login/zh/?externalChallenge=login&app={}",
-            self.code
-        )
+    /// 登录页 URL（token 捕获用）
+    /// CN 走国服 externalChallenge；其他区域走全球站 password 直登页，
+    /// 两者登录成功后都会重定向到 localhost:0/?ST=... 供捕获
+    pub fn login_url(&self, region: &str) -> String {
+        if region.eq_ignore_ascii_case("CN") {
+            format!(
+                "https://account.battlenet.com.cn/login/zh/?externalChallenge=login&app={}",
+                self.code
+            )
+        } else {
+            format!(
+                "https://account.battle.net/login/zh/password?app={}",
+                self.code
+            )
+        }
     }
 
     /// HKCU 下 token 写入的注册表路径
@@ -239,14 +248,28 @@ mod tests {
     }
 
     #[test]
-    fn login_url_derives_from_code() {
+    fn login_url_derives_from_code_and_region() {
+        // CN 保持国服 externalChallenge 地址
         assert_eq!(
-            get_game("osic").unwrap().login_url(),
+            get_game("osic").unwrap().login_url("CN"),
             "https://account.battlenet.com.cn/login/zh/?externalChallenge=login&app=OSI"
         );
         assert_eq!(
-            get_game("wow").unwrap().login_url(),
+            get_game("wow").unwrap().login_url("cn"),
             "https://account.battlenet.com.cn/login/zh/?externalChallenge=login&app=WOW"
+        );
+        // 非 CN 走全球站 password 直登页，app= 按游戏 code 代入
+        assert_eq!(
+            get_game("osic").unwrap().login_url("US"),
+            "https://account.battle.net/login/zh/password?app=OSI"
+        );
+        assert_eq!(
+            get_game("wow").unwrap().login_url("KR"),
+            "https://account.battle.net/login/zh/password?app=WOW"
+        );
+        assert_eq!(
+            get_game("wow").unwrap().login_url("EU"),
+            "https://account.battle.net/login/zh/password?app=WOW"
         );
     }
 

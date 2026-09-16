@@ -45,6 +45,8 @@ const props = defineProps<{
   accountId: string
   /** 账号所属游戏 uid（osic / wow），决定登录页 app= 参数 */
   game?: string
+  /** 服务器区域（CN/KR/EU/US），非 CN 走全球站直登页 */
+  region?: string
 }>()
 
 const emit = defineEmits<{
@@ -80,6 +82,7 @@ const initLogin = async () => {
     await invoke('open_login_with_navigation', {
       accountId: props.accountId,
       game: props.game || 'osic',
+      region: props.region || 'CN',
     })
   } catch (error) {
     console.error('初始化登录失败:', error)

@@ -194,6 +194,9 @@ struct BackupAccount {
     game: String,
     #[serde(default = "default_backup_flavor")]
     flavor: String,
+    /// 旧备份缺省为 CN
+    #[serde(default = "default_backup_region")]
+    region: String,
     custom_args: String,
     window_x: Option<i32>,
     window_y: Option<i32>,
@@ -213,6 +216,10 @@ fn default_backup_game() -> String {
 
 fn default_backup_flavor() -> String {
     "retail".to_string()
+}
+
+fn default_backup_region() -> String {
+    "CN".to_string()
 }
 
 /// 导出账号（含认证 token）到密码加密的备份文件
@@ -254,6 +261,7 @@ pub fn export_accounts(
             token_set_at: acc.token_set_at,
             game: acc.game.clone(),
             flavor: acc.flavor.clone(),
+            region: acc.region.clone(),
             custom_args: acc.custom_args.clone(),
             window_x: acc.window_x,
             window_y: acc.window_y,
@@ -303,6 +311,7 @@ pub fn import_accounts(
             token_set_at: b.token_set_at,
             game: b.game,
             flavor: b.flavor,
+            region: b.region,
             custom_args: b.custom_args,
             window_x: b.window_x,
             window_y: b.window_y,
@@ -354,6 +363,7 @@ mod tests {
             token_set_at: None,
             game: "osic".to_string(),
             flavor: "retail".to_string(),
+            region: "CN".to_string(),
             custom_args: String::new(),
             window_x: None,
             window_y: None,

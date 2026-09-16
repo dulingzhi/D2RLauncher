@@ -334,6 +334,7 @@ async function handleSave(data: Omit<Account, 'id' | 'encrypted_token' | 'token_
         label: data.label,
         game: data.game,
         flavor: data.flavor,
+        region: data.region,
         customArgs: data.custom_args,
         windowX: data.window_x,
         windowY: data.window_y,

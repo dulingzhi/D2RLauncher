@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import type { Account } from '../types'
-import { GAME_OPTIONS, WOW_FLAVOR_OPTIONS } from '../types'
+import { GAME_OPTIONS, WOW_FLAVOR_OPTIONS, REGION_OPTIONS } from '../types'
 
 const props = defineProps<{
   visible: boolean
@@ -15,6 +15,7 @@ const emit = defineEmits<{
 const label = ref('')
 const game = ref<string>('osic')
 const flavor = ref<string>('retail')
+const region = ref<string>('CN')
 const customArgs = ref('')
 const windowX = ref<number | null>(null)
 const windowY = ref<number | null>(null)
@@ -30,6 +31,7 @@ watch(
       label.value = props.initial.label
       game.value = props.initial.game || 'osic'
       flavor.value = props.initial.flavor || 'retail'
+      region.value = props.initial.region || 'CN'
       customArgs.value = props.initial.custom_args
       windowX.value = props.initial.window_x
       windowY.value = props.initial.window_y
@@ -39,6 +41,7 @@ watch(
       label.value = ''
       game.value = 'osic'
       flavor.value = 'retail'
+      region.value = 'CN'
       customArgs.value = ''
       windowX.value = null
       windowY.value = null
@@ -60,6 +63,7 @@ function submit() {
     label: label.value.trim(),
     game: game.value,
     flavor: flavor.value,
+    region: region.value,
     custom_args: customArgs.value.trim(),
     window_x: toNullableNumber(windowX.value),
     window_y: toNullableNumber(windowY.value),
@@ -90,6 +94,15 @@ function submit() {
               <select v-model="game">
                 <option v-for="g in GAME_OPTIONS" :key="g.uid" :value="g.uid">
                   {{ g.icon }} {{ g.label }}
+                </option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label>服务器</label>
+              <select v-model="region">
+                <option v-for="r in REGION_OPTIONS" :key="r.value" :value="r.value">
+                  {{ r.label }}（{{ r.value }}）
                 </option>
               </select>
             </div>

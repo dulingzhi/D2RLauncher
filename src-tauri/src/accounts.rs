@@ -6,6 +6,17 @@ use uuid::Uuid;
 
 use crate::models::Account;
 
+/// 服务器代码归一化：仅接受 CN/KR/EU/US（大小写不敏感），其余一律回退 CN
+fn normalize_region(region: Option<&str>) -> String {
+    const REGIONS: [&str; 4] = ["CN", "KR", "EU", "US"];
+    let r = region.unwrap_or("").trim().to_uppercase();
+    if REGIONS.contains(&r.as_str()) {
+        r
+    } else {
+        "CN".to_string()
+    }
+}
+
 #[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
 
@@ -46,6 +57,7 @@ pub fn add_account(
     label: String,
     game: Option<String>,
     flavor: Option<String>,
+    region: Option<String>,
     custom_args: String,
     window_x: Option<i32>,
     window_y: Option<i32>,
@@ -56,6 +68,7 @@ pub fn add_account(
     if crate::games::get_game(&game).is_none() {
         return Err(format!("不支持的游戏 uid: {}", game));
     }
+    let region = normalize_region(region.as_deref());
     let mut accounts = load_accounts(&app);
     let account = Account {
         id: Uuid::new_v4().to_string(),
@@ -64,6 +77,7 @@ pub fn add_account(
         token_set_at: None,
         game,
         flavor: flavor.unwrap_or_else(|| "retail".to_string()),
+        region,
         custom_args,
         window_x,
         window_y,
@@ -79,6 +93,10 @@ pub fn add_account(
 pub fn update_account(app: tauri::AppHandle, account: Account) -> Result<(), String> {
     let mut accounts = load_accounts(&app);
     if let Some(pos) = accounts.iter().position(|a| a.id == account.id) {
+        let account = Account {
+            region: normalize_region(Some(&account.region)),
+            ..account
+        };
         accounts[pos] = account;
         save_accounts(&app, &accounts)?;
         Ok(())
@@ -276,6 +294,7 @@ mod tests {
             token_set_at: None,
             game: "osic".to_string(),
             flavor: "retail".to_string(),
+            region: "CN".to_string(),
             custom_args: String::new(),
             window_x: None,
             window_y: None,

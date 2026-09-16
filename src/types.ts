@@ -8,6 +8,8 @@ export interface Account {
   game: string
   /** WoW 分支：retail / classic / classic_era（仅 wow 使用） */
   flavor: string
+  /** 服务器区域：CN / KR / EU / US */
+  region: string
   custom_args: string
   window_x: number | null
   window_y: number | null
@@ -42,6 +44,14 @@ export const WOW_FLAVOR_OPTIONS = [
   { value: 'anniversary', label: '周年庆', folder: '_anniversary_' },
 ] as const
 
+/** 服务器区域定义（与注册表 REGION 代码一致） */
+export const REGION_OPTIONS = [
+  { value: 'CN', label: '国服' },
+  { value: 'KR', label: '韩服' },
+  { value: 'EU', label: '欧服' },
+  { value: 'US', label: '美服' },
+] as const
+
 export function gameInfo(uid: string) {
   return GAME_OPTIONS.find((g) => g.uid === uid) ?? GAME_OPTIONS[0]
 }
@@ -49,6 +59,11 @@ export function gameInfo(uid: string) {
 /** 分支短名（卡片徽标等紧凑场景用） */
 export function wowFlavorLabel(flavor: string) {
   return WOW_FLAVOR_OPTIONS.find((f) => f.value === flavor)?.label ?? flavor
+}
+
+/** 服务器区域中文名（缺省/未知按国服显示） */
+export function regionLabel(region: string) {
+  return REGION_OPTIONS.find((r) => r.value === region)?.label ?? '国服'
 }
 
 // 导入模式：与 Rust 端 backup::ImportMode 的 snake_case 序列化保持一致

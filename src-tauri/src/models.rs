@@ -14,6 +14,9 @@ pub struct Account {
     /// WoW 客户端分支：retail / classic / classic_era（仅 wow 使用）
     #[serde(default = "default_flavor")]
     pub flavor: String,
+    /// 服务器区域：CN / KR / EU / US（旧数据默认 "CN"）
+    #[serde(default = "default_region")]
+    pub region: String,
     pub custom_args: String,
     pub window_x: Option<i32>,
     pub window_y: Option<i32>,
@@ -29,4 +32,8 @@ fn default_game() -> String {
 
 fn default_flavor() -> String {
     "retail".to_string()
+}
+
+fn default_region() -> String {
+    "CN".to_string()
 }

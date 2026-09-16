@@ -148,21 +148,30 @@ pub fn dpapi_decrypt_token(encrypted: &[u8]) -> Result<String, String> {
 }
 
 /// 将 token 加密后写入对应游戏的注册表键
-/// uid 见 games::get_game（"osic" / "wow"）
+/// uid 见 games::get_game（"osic" / "wow"）；region 为服务器代码（CN/KR/EU/US）
 #[tauri::command]
-pub fn write_token_to_registry(plain_token: String, game: String) -> Result<(), String> {
+pub fn write_token_to_registry(
+    plain_token: String,
+    game: String,
+    region: String,
+) -> Result<(), String> {
     #[cfg(windows)]
     {
         use winreg::{enums::*, RegKey};
 
         let cfg = crate::games::get_game(&game)
             .ok_or_else(|| format!("不支持的游戏 uid: {}", game))?;
+        let region = if region.trim().is_empty() {
+            "CN".to_string()
+        } else {
+            region
+        };
         let protected = dpapi_encrypt_token(&plain_token)?;
 
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
         let (key, _) = hkcu.create_subkey(cfg.registry_path()).map_err(|e| e.to_string())?;
 
-        key.set_value("REGION", &"CN").map_err(|e| e.to_string())?;
+        key.set_value("REGION", &region).map_err(|e| e.to_string())?;
         key.set_raw_value(
             "WEB_TOKEN",
             &winreg::RegValue {
@@ -177,6 +186,7 @@ pub fn write_token_to_registry(plain_token: String, game: String) -> Result<(), 
     #[cfg(not(windows))]
     {
         let _ = game;
+        let _ = region;
         Err("Registry operations are only available on Windows".to_string())
     }
 }
@@ -187,6 +197,7 @@ pub fn open_login_window(
     app: tauri::AppHandle,
     account_id: String,
     game: Option<String>,
+    region: Option<String>,
 ) -> Result<(), String> {
     use tauri::{Emitter, Manager, WebviewWindowBuilder, WebviewUrl};
 
@@ -198,9 +209,12 @@ pub fn open_login_window(
 
     let cfg = crate::games::get_game(&game.unwrap_or_else(|| "osic".to_string()))
         .ok_or_else(|| "不支持的游戏 uid".to_string())?;
-    let login_url = cfg.login_url();
+    let region = region.unwrap_or_else(|| "CN".to_string());
+    let login_url = cfg.login_url(&region);
+    let region_label = region.to_uppercase();
     let app_clone = app.clone();
     let aid = account_id.clone();
+    let title = format!("Battle.net {} 登录", region_label);
 
     // 创建登录窗口
     WebviewWindowBuilder::new(
@@ -208,7 +222,7 @@ pub fn open_login_window(
         "login",
         WebviewUrl::External(login_url.parse().map_err(|e: url::ParseError| e.to_string())?),
     )
-    .title("Battle.net CN 登录")
+    .title(title)
     .inner_size(960.0, 720.0)
     .min_inner_size(800.0, 600.0)
     .center()

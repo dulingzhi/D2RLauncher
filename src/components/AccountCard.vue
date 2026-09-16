@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import type { Account } from '../types'
-import { tokenAge, gameInfo, wowFlavorLabel } from '../types'
+import { tokenAge, gameInfo, wowFlavorLabel, regionLabel } from '../types'
 import LoginDialog from './LoginDialog.vue'
 import { useToast } from '../composables/useToast'
 
@@ -83,6 +83,7 @@ const game = computed(() => gameInfo(props.account.game))
 const flavorText = computed(() =>
   props.account.game === 'wow' ? wowFlavorLabel(props.account.flavor) : '',
 )
+const regionText = computed(() => regionLabel(props.account.region))
 
 const runningDuration = computed(() => {
   if (!props.runningGame) return ''
@@ -133,7 +134,7 @@ function killProcess() {
       <div class="account-info">
         <span class="account-label">
           {{ account.label }}
-          <span class="game-badge">{{ game.icon }} {{ game.short }}<template v-if="flavorText"> · {{ flavorText }}</template></span>
+          <span class="game-badge">{{ game.icon }} {{ game.short }} · {{ regionText }}<template v-if="flavorText"> · {{ flavorText }}</template></span>
           <span v-if="isRunning" class="running-badge">运行中</span>
         </span>
         <span class="account-sub">
@@ -178,6 +179,7 @@ function killProcess() {
     :visible="showLoginDialog"
     :account-id="account.id"
     :game="account.game || 'osic'"
+    :region="account.region || 'CN'"
     @token-captured="handleTokenCaptured"
     @cancel="handleLoginCancel"
   />
